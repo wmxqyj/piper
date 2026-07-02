@@ -30,11 +30,28 @@ recording:
   buffer_size: 1000  # 缓冲区大小
   auto_start: false  # 是否自动开始录制
 
+# 任务配置列表（包含任务名称和语言指令）
+# 录制时直接从列表中选择任务，不需要手动输入语言指令
+tasks:
+  - name: "pick_place"
+    descriptions: ["pick up the red block and place it in the box"]
+    episode_start: 0
+    
+  - name: "push_button"
+    descriptions: ["push the blue button"]
+    episode_start: 0
+    
+  - name: "slide_block"
+    descriptions: ["slide the block to the left"]
+    episode_start: 0
+    
+  - name: "open_drawer"
+    descriptions: ["open the drawer"]
+    episode_start: 0
+
 # 数据保存配置
 demo:
   save_path: "/home/siat/data/piper_demos"  # 保存路径
-  task: "task_name"  # 任务名称
-  episode: 0  # episode 编号
   variation: 0  # variation 编号
   random_seed: 42  # 随机种子
 

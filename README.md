@@ -1,300 +1,633 @@
-# pyAgxArm User Guide
+# Piper 双臂主从数据采集系统
 
-> `pyAgxArm` is a Python SDK for AgileX robotic arms and end effectors. It supports CAN communication, status reading, motion control, and end-effector control for Piper, Nero, AgxGripper, and Revo2.
+基于 Piper SDK 和 PyRealSense 的主从操作数据采集系统，支持将轨迹数据保存为 RLBench 格式（6关节版本）。
 
-## Table of Contents
+## 系统概述
 
-- [Switch to 中文](#pyagxarm-使用说明)
-- [Introduction](#pyagxarm-user-guide)
-- [Environment](#environment)
-- [Documentation](#documentation)
-- [Install](#install)
-- [Communication Setup](#communication-setup)
-- [Quick Start](#quick-start)
-- [Notes](#notes)
-- [Contact](#contact)
+本系统用于采集 Piper 双臂主从操作的演示数据，适用于机器人学习训练。主要特点：
 
+- **主从控制**：主臂零力拖动示教，从臂实时跟随执行
+- **数据采集**：同步采集机械臂状态和相机数据
+- **格式适配**：保存为 RLBench 格式（适配6关节机械臂）
+- **数据清洗**：支持帧删除和关键帧标记
 
-### Environment
+## 文件结构
 
-- Ubuntu: `18.04 / 20.04 / 22.04 / 24.04`
-- Windows: `10 / 11`
-- macOS (Darwin)
-- Python: `3.6` and above (compatible up to `3.14`)
-
-### Documentation
-
-| Topic | Link |
-| --- | --- |
-| GitHub Discussions | [All](https://github.com/agilexrobotics/pyAgxArm/discussions) · [Announcements](https://github.com/agilexrobotics/pyAgxArm/discussions/categories/announcements) · [General](https://github.com/agilexrobotics/pyAgxArm/discussions/categories/general) · [Q&A](https://github.com/agilexrobotics/pyAgxArm/discussions/categories/q-a) |
-| ROS | [agx_arm_ros](https://github.com/agilexrobotics/agx_arm_ros) |
-| Piper API | [docs/piper/piper_api.md](./docs/piper/piper_api.md#piper-api-documentation) |
-| Nero API | [docs/nero/nero_api.md](./docs/nero/nero_api.md#nero-api-documentation) |
-| AgxGripper API | [docs/effector/agx_gripper/agx_gripper_api.md](./docs/effector/agx_gripper/agx_gripper_api.md#agxgripper-api-documentation) |
-| Revo2 API | [docs/effector/revo2/revo2_api.md](./docs/effector/revo2/revo2_api.md#revo2-api-documentation) |
-| Revo2 Touch API | [docs/effector/revo2_touch/revo2_touch_api.md](./docs/effector/revo2_touch/revo2_touch_api.md#revo2-touch-api-documentation) |
-| CAN module manual | [docs/can_user.md](./docs/can_user.md#can-module-manual) |
-| Nero first-time CAN guide | [docs/nero/first_time_user_guide_can.md](./docs/nero/first_time_user_guide_can.md#nero-first-time-user-guide-can) |
-| WSL2 USB-CAN guide | [docs/wsl2_usb_can_guide.md](./docs/wsl2_usb_can_guide.md#wsl2-ubuntu-2204-complete-usb-can-setup-guide) |
-| Ubuntu 24.04 pip guide | [docs/ubuntu_24_04_pip_install.md](./docs/ubuntu_24_04_pip_install.md#ubuntu-2404-pip-installation-guide) |
-| Changelog | [CHANGELOG.md](./CHANGELOG.md#changelog) |
-| Demos | [pyAgxArm/demos](./pyAgxArm/demos) |
-
-### Install
-
-```shell
-pip3 install python-can
+```
+src/data_collection/
+├── README.md                       # 本说明文档
+├── cfgs/
+│   └── piper_data_collect.yaml    # 配置文件
+├── piper_interface.py              # Piper SDK 接口封装
+├── camera_interface.py             # PyRealSense 相机接口
+├── data_sync.py                    # 数据同步机制
+├── rlbench_adapter.py              # RLBench 格式适配器
+├── data_collect_piper.py           # 主录制脚本
+└── data_cleaner.py                 # 数据清洗工具
 ```
 
-`python-can` should be newer than `3.3.4`.
+## 系统架构
 
-If you want to use this SDK on Windows, you must install the `python-can-agx-cando` plugin and use the `agx_cando` interface. The recommended way is:
-
-```shell
-pip3 install "git+https://github.com/agilexrobotics/python-can-agx-cando.git"
+```
+┌─────────────────────────────────────────────────┐
+│          主臂 (Leader)                           │
+│          零力拖动示教                             │
+│          CAN: can_piper_l                       │
+└──────────────┬──────────────────────────────────┘
+               │ Piper SDK
+               ▼
+┌─────────────────────────────────────────────────┐
+│          主从控制循环                             │
+│          - 读取主臂关节角度                       │
+│          - 发送命令给从臂                         │
+│          - 同步夹爪状态                           │
+└──────────────┬──────────────────────────────────┘
+               │
+               ▼
+┌─────────────────────────────────────────────────┐
+│          从臂 (Follower)                         │
+│          实时跟随执行                             │
+│          CAN: can_piper_r                       │
+└──────────────┬──────────────────────────────────┘
+               │ 状态数据采集
+               ▼
+┌─────────────────────────────────────────────────┐
+│          RGB-D 相机                              │
+│          (RealSense)                             │
+└──────────────┬──────────────────────────────────┘
+               │ 图像数据采集
+               ▼
+┌─────────────────────────────────────────────────┐
+│          数据同步                                 │
+│          时间戳同步 (<50ms)                       │
+└──────────────┬──────────────────────────────────┘
+               │
+               ▼
+┌─────────────────────────────────────────────────┐
+│          RLBench 格式转换                         │
+│          (6关节版本)                              │
+└──────────────┬──────────────────────────────────┘
+               │
+               ▼
+┌─────────────────────────────────────────────────┐
+│          数据保存                                 │
+│          - RGB/Depth 图像                         │
+│          - 低维状态 (pickle)                      │
+│          - 语言目标                               │
+└─────────────────────────────────────────────────┘
 ```
 
-You can also clone the repository and install it locally:
+## 模块说明
 
-```shell
-git clone https://github.com/agilexrobotics/python-can-agx-cando.git
-cd python-can-agx-cando
-pip3 install .
+### 1. 配置文件 (`cfgs/piper_data_collect.yaml`)
+
+包含所有系统参数：
+- 机械臂配置（CAN通道、控制频率）
+- 相机配置（分辨率、帧率）
+- 录制参数（频率、缓冲区）
+- 保存路径和格式
+
+### 2. Piper 接口 (`piper_interface.py`)
+
+**主要功能**：
+- 连接主臂和从臂
+- 设置主臂为零力拖动模式
+- 运行主从控制循环（50Hz）
+- 获取从臂完整状态数据
+
+**核心 API**：
+```python
+# 连接
+interface.connect()
+
+# 运行主从循环
+interface.run_leader_follower_loop(callback_func=my_callback)
+
+# 获取从臂状态
+state = interface.get_follower_state()
+# 返回: PiperArmState(joint_positions, joint_velocities, joint_forces,
+#                     gripper_pose, gripper_positions, gripper_open)
+
+# 清理资源
+interface.cleanup()
 ```
 
-Then install `pyAgxArm`. The recommended way is to install directly from GitHub:
+### 3. 相机接口 (`camera_interface.py`)
 
-```shell
-pip3 install "git+https://github.com/agilexrobotics/pyAgxArm.git"
+**主要功能**：
+- 连接 RealSense 相机
+- 获取 RGB 和深度图像
+- 提取相机内参矩阵
+- 深度对齐到彩色图像
+
+**核心 API**：
+```python
+# 连接
+camera.connect()
+
+# 获取数据
+data = camera.get_camera_data()
+# 返回: CameraData(rgb_image, depth_image, camera_intrinsics, camera_extrinsics)
+
+# 获取内参矩阵
+intrinsics = camera.get_intrinsics_matrix()  # 3x3
+
+# 清理资源
+camera.cleanup()
 ```
 
-You can also clone the repository and install it locally:
+### 4. 数据同步 (`data_sync.py`)
 
-```shell
-git clone https://github.com/agilexrobotics/pyAgxArm.git
-cd pyAgxArm
-pip3 install .
+**主要功能**：
+- 同步机械臂和相机数据（基于时间戳）
+- 管理帧缓冲区
+- 统计录制信息
+
+**核心 API**：
+```python
+# 创建同步管理器
+sync_manager = DataSyncManager(config)
+
+# 同步数据
+frame = sync_manager.sync_data(arm_state, camera_data)
+# 返回: SyncedFrame(timestamp, joint_positions, ..., front_rgb, front_depth)
+
+# 添加到缓冲区
+sync_manager.add_frame_to_buffer(frame)
+
+# 获取统计信息
+sync_manager.print_stats()
 ```
 
-Ubuntu 24.04 users can also refer to:
-[docs/ubuntu_24_04_pip_install.md](./docs/ubuntu_24_04_pip_install.md#ubuntu-2404-pip-installation-guide)
+### 5. RLBench 适配器 (`rlbench_adapter.py`)
 
-### Communication Setup
+**主要功能**：
+- 转换为 RLBench 格式（6关节版本）
+- 欧拉角 → 四元数转换
+- 位姿 → 4x4 矩阵转换
+- 保存为 pickle 文件
 
-See:
-[docs/can_user.md](./docs/can_user.md#can-module-manual)
+**核心 API**：
+```python
+# 创建适配器
+adapter = RLBenchAdapter(config)
 
-### Quick Start
+# 转换帧为观测
+obs = adapter.convert_frame_to_observation(frame)
 
-Assume default channel values in this quick-start example:
+# 转换帧列表为 Demo
+demo = adapter.convert_frames_to_demo(frames)
 
-- Windows: `interface="agx_cando"`, `channel="0"`
-- Linux: `interface="socketcan"`, `channel="can0"`
-- macOS: `interface="slcan"`, `channel="/dev/ttyACM0"`
+# 保存 Demo
+adapter.save_demo(demo, save_path, episode_idx)
+```
 
-Prerequisites before running:
+### 6. 主录制脚本 (`data_collect_piper.py`)
 
-- Linux: activate CAN first (for example: `sudo ip link set can0 up type can bitrate 1000000`)
-- Linux: you can also use our shell scripts in [CAN module manual - Activate a Single CAN Module](./docs/can_user.md#2-activate-a-single-can-module)
-- macOS: grant serial permission first (`sudo chmod 777 /dev/ttyACM0`)
+**主要功能**：
+- 集成所有模块
+- 交互式录制控制
+- 数据保存
+
+**使用方法**：
+```bash
+python data_collect_piper.py
+```
+
+**交互流程**：
+1. 初始化系统
+2. 输入任务名称、episode 编号
+3. 主从控制启动
+4. 输入命令：
+   - `s` - 开始录制
+   - `q` - 停止录制
+   - `y` - 保存数据
+   - `n` - 丢弃数据
+   - `e` - 退出系统
+
+### 7. 数据清洗工具 (`data_cleaner.py`)
+
+**主要功能**：
+- 删除前/后 N 帧
+- 交互式标记关键帧
+- 自动检测关键帧
+- 清理多余图像文件
+
+**使用方法**：
+```bash
+python data_cleaner.py
+```
+
+**清洗流程**：
+1. 输入 Episode 路径
+2. 选择操作：
+   - `1` - 删除帧
+   - `2` - 交互式标记关键帧
+   - `3` - 自动检测关键帧
+   - `4` - 保存清洗数据
+   - `0` - 退出
+
+## 数据格式
+
+### Observation 结构（6关节版本）
 
 ```python
-import time
-from platform import system
-from pyAgxArm import create_agx_arm_config, AgxArmFactory, ArmModel, NeroFW
-
-# Nero firmware: <= 1.10 → NeroFW.DEFAULT; 1.11 → NeroFW.V111; 1.12 → NeroFW.V112; >= 1.20 → NeroFW.V120.
-platform_system = system()
-if platform_system == "Windows":
-    interface = "agx_cando"
-    channel = "0"
-elif platform_system == "Linux":
-    interface = "socketcan"
-    channel = "can0"
-elif platform_system == "Darwin":
-    interface = "slcan"
-    channel = "/dev/ttyACM0"
-else:
-    raise RuntimeError("pyAgxArm currently documents Linux `socketcan`, Windows `agx_cando`, and macOS `slcan`.")
-
-cfg = create_agx_arm_config(
-    robot=ArmModel.NERO,
-    firmeware_version=NeroFW.DEFAULT,
-    interface=interface,
-    channel=channel,
+Observation(
+    # 视觉数据
+    front_rgb: np.ndarray,          # shape: (H, W, 3), dtype: uint8
+    front_depth: np.ndarray,        # shape: (H, W), dtype: uint16
+    
+    # 机械臂状态（6关节）
+    joint_positions: np.ndarray,    # shape: (6,), 单位: rad
+    joint_velocities: np.ndarray,   # shape: (6,), 单位: rad/s
+    joint_forces: np.ndarray,       # shape: (6,), 单位: N·m
+    
+    # 末端状态
+    gripper_pose: np.ndarray,       # shape: (7,), [x,y,z,qx,qy,qz,qw]
+    gripper_matrix: np.ndarray,     # shape: (4, 4)
+    gripper_open: float,            # 0.0 或 1.0
+    gripper_joint_positions: np.ndarray,  # shape: (2,)
+    
+    # 相机参数（在 misc 中）
+    misc: {
+        'front_camera_intrinsics': np.ndarray,  # shape: (3, 3)
+        'front_camera_extrinsics': np.ndarray,  # shape: (4, 4)
+        'front_camera_near': float,             # 0.5
+        'front_camera_far': float,              # 4.5
+        'keypoint_idxs': np.ndarray             # 关键帧索引
+    }
 )
-robot = AgxArmFactory.create_arm(cfg)
-robot.connect()
-
-while True:
-    ja = robot.get_joint_angles()
-    if ja is not None:
-        print(ja.msg)
-        print(ja.hz, ja.timestamp)
-    time.sleep(0.005)
 ```
 
-### Notes
+### 保存路径结构
 
-- Activate CAN first and configure the correct bitrate before reading or controlling the arm.
-- On Windows, `interface="agx_cando"` requires the separately installed `python-can-agx-cando` plugin.
-- On macOS (`Darwin`), grant serial-port permission before using `interface="slcan"`.
-- MIT single-joint control is an advanced feature; improper use may damage the robot.
+```
+/home/siat/data/piper_demos/
+└── task_name/
+    └── all_variations/
+        └── episodes/
+            └── episode0/
+                ├── front_rgb/
+                │   ├── 0.png
+                │   ├── 1.png
+                │   └── ...
+                ├── front_depth/
+                │   ├── 0.png
+                │   ├── 1.png
+                │   └── ...
+                ├── low_dim_obs.pkl           # Demo 对象
+                ├── variation_number.pkl      # variation 编号
+                └── variation_descriptions.pkl # 语言目标
+```
 
-### Contact
+## 使用示例
 
-- [GitHub Discussions](https://github.com/agilexrobotics/pyAgxArm/discussions) (announcements, Q&A, ideas, and community discussion)
-- [GitHub Issues](https://github.com/agilexrobotics/pyAgxArm/issues) (bugs, feature requests, documentation, and other tracked items)
-- Email: [support@agilex.ai](mailto:support@agilex.ai) (firmware, host software, tool packages, and after-sales support)
-- Discord: <https://discord.gg/wrKYTxwDBd> (real-time chat and community help)
+### 1. 基本录制流程
+
+```bash
+# 1. 启动录制系统
+cd src/data_collection
+python data_collect_piper.py
+
+# 2. 系统初始化
+[1/4] 初始化 Piper 双臂接口...
+[2/4] 初始化 RealSense 相机...
+[3/4] 初始化数据同步管理器...
+[4/4] 初始化 RLBench 格式适配器...
+
+# 3. 选择任务（从配置文件）
+可用任务列表:
+  [0] pick_place: ['pick up the red block and place it in the box']
+  [1] push_button: ['push the blue button']
+  [2] slide_block: ['slide the block to the left']
+  [3] open_drawer: ['open the drawer']
+
+选择任务:
+输入任务编号 (0-3): 0
+
+任务配置:
+任务名称: pick_place
+语言指令: ['pick up the red block and place it in the box']
+起始Episode: 0
+Variation: 0
+
+# 4. 开始录制
+输入命令: s
+录制已开始，拖动主臂进行示教...
+当前任务: pick_place | Episode: 0
+已录制 50 帧
+已录制 100 帧
+...
+
+# 5. 停止录制
+输入命令: q
+停止录制...
+缓冲区帧数: 150
+录制时长: 3.0s
+平均帧率: 50.0fps
+
+# 6. 保存数据（语言指令已从配置文件读取）
+保存数据？(y/n): y
+保存 Episode...
+任务名称: pick_place
+Episode: 0
+语言指令: ['pick up the red block and place it in the box']
+已保存到 /home/siat/data/piper_demos/pick_place/all_variations/episodes/episode0
+
+下一个 Episode 编号: 1
+
+# 7. 继续录制下一个 episode
+输入命令: s
+录制已开始，拖动主臂进行示教...
+当前任务: pick_place | Episode: 1
+...
+```
+
+### 2. 数据清洗流程
+
+```bash
+# 1. 启动清洗工具
+cd src/data_collection
+python data_cleaner.py
+
+# 2. 输入 Episode 路径
+输入 Episode 路径: /home/siat/data/piper_demos/pick_place/all_variations/episodes/episode0
+
+# 3. 显示信息
+Episode 信息
+总帧数: 150
+关键帧索引: []
+
+# 4. 删除帧
+选择操作: 1
+删除前N帧 (默认0): 10
+删除后N帧 (默认0): 5
+删除了前 10 帧
+删除了后 5 帧
+剩余 135 帧
+
+# 5. 自动检测关键帧
+选择操作: 3
+关节角度变化阈值 (默认0.1 rad): 0.15
+自动检测到 5 个关键帧: [20, 45, 72, 100, 128]
+是否使用自动检测的关键帧？(y/n): y
+
+# 6. 交互式标记
+选择操作: 2
+输入命令: m 60
+已标记帧 60 为关键帧
+输入命令: u 72
+已取消帧 72 的关键帧标记
+输入命令: q
+完成关键帧标记
+
+# 7. 保存
+选择操作: 4
+输出路径 (默认覆盖原文件): 
+已保存，共 135 帧
+关键帧索引: [20, 45, 60, 100, 128]
+
+# 8. 退出
+选择操作: 0
+```
+
+## 配置说明
+
+### 修改配置文件
+
+编辑 `cfgs/piper_data_collect.yaml`：
+
+```yaml
+# 机械臂配置
+piper:
+  leader_can: "can_piper_l"      # 修改为实际的 CAN 通道
+  follower_can: "can_piper_r"    # 修改为实际的 CAN 通道
+  control_frequency: 50          # 控制频率（Hz）
+
+# 相机配置
+camera:
+  resolution:
+    width: 640                   # 图像宽度
+    height: 480                  # 图像高度
+  fps: 30                        # 帧率
+
+# 任务配置列表（重点：包含任务名称和语言指令）
+tasks:
+  - name: "pick_place"           # 任务名称
+    descriptions: ["pick up the red block and place it in the box"]  # 语言指令
+    episode_start: 0             # 起始 episode 编号
+    
+  - name: "push_button"
+    descriptions: ["push the blue button"]
+    episode_start: 0
+    
+  # 添加更多任务...
+  - name: "custom_task"
+    descriptions: ["your custom language instruction"]
+    episode_start: 10            # 可以从任意编号开始
+
+# 数据保存配置
+demo:
+  save_path: "/home/siat/data/piper_demos"  # 保存路径
+  variation: 0                              # variation 编号
+```
+
+**任务配置说明**：
+- `name`: 任务名称，用于创建保存目录
+- `descriptions`: 语言指令列表，保存时会自动使用
+- `episode_start`: 起始 episode 编号，每次保存后自动递增
+
+**添加新任务**：
+只需在 `tasks` 列表中添加新的配置项即可，无需修改代码。
+
+### 环境要求
+
+**硬件**：
+- 两个 Piper 机械臂（通过 CAN 总线连接）
+- AgxGripper 夹爪（可选）
+- RealSense RGB-D 相机
+
+**软件**：
+- Python 3.8+
+- pyAgxArm SDK
+- pyrealsense2
+- numpy
+- opencv-python
+- pyyaml
+
+**CAN 总线配置**（Linux）：
+```bash
+sudo ip link set can_piper_l up type can bitrate 1000000
+sudo ip link set can_piper_r up type can bitrate 1000000
+```
+
+## 常见问题
+
+### Q1: 如何添加新的任务？
+
+A: 在配置文件 `cfgs/piper_data_collect.yaml` 中的 `tasks` 列表添加新配置：
+
+```yaml
+tasks:
+  - name: "new_task"
+    descriptions: ["your new language instruction"]
+    episode_start: 0
+```
+
+保存后重启录制系统，新任务就会出现在任务列表中。
+
+### Q2: 相机连接失败怎么办？
+
+A: 检查相机是否正确连接，系统会继续运行但不会记录相机数据。也可以修改配置禁用相机：
+
+```yaml
+camera:
+  type: "none"  # 禁用相机
+```
+
+### Q3: 主臂无法拖动？
+
+A: 确认主臂已进入零力拖动模式，检查 CAN 总线是否正确配置。
+
+### Q4: 数据同步失败？
+
+A: 检查时间戳差异，默认容忍 50ms。可以修改配置：
+
+```yaml
+recording:
+  max_time_diff: 0.1  # 改为 100ms
+```
+
+### Q5: 如何修改关节数量？
+
+A: 修改配置文件中的 `joint_nums`，但需要同步修改 RLBench 适配器代码。
+
+### Q6: 如何从特定的 episode 编号开始录制？
+
+A: 在任务配置中设置 `episode_start`：
+
+```yaml
+tasks:
+  - name: "pick_place"
+    episode_start: 10  # 从 episode10 开始录制
+```
+
+### Q7: 关键帧检测不准确？
+
+A: 调整自动检测的阈值：
+```python
+keypoints = cleaner.auto_detect_keypoints(threshold=0.2)  # 更大的阈值
+```
+
+## 性能优化
+
+### 提高控制频率
+
+```yaml
+piper:
+  control_frequency: 100  # 提高到 100Hz
+```
+
+### 降低图像分辨率
+
+```yaml
+camera:
+  resolution:
+    width: 320
+    height: 240
+  fps: 15
+```
+
+### 使用多线程
+
+录制脚本已经使用多线程：
+- 主线程：用户交互
+- 子线程：主从控制循环
+
+## 测试方法
+
+### 测试 Piper 接口
+
+```bash
+python piper_interface.py
+```
+
+### 测试相机接口
+
+```bash
+python camera_interface.py
+```
+
+### 测试完整系统
+
+```bash
+python data_collect_piper.py
+```
+
+建议在安全环境下先测试基本功能，确认无误后再进行正式录制。
+
+## 安全注意事项
+
+1. **启动前检查**：确保机械臂周围无障碍物
+2. **运动范围限制**：注意不要超出机械臂的工作空间
+3. **夹爪操作**：小心夹爪的开合动作
+4. **紧急停止**：随时准备按 Ctrl+C 安全退出
+5. **数据备份**：定期备份录制的数据
+
+## 开发说明
+
+### 扩展功能
+
+**添加新的相机类型**：
+```python
+# 在 camera_interface.py 中添加新的相机类
+class CustomCameraInterface:
+    def connect(self): ...
+    def get_camera_data(self): ...
+```
+
+**修改数据格式**：
+```python
+# 在 rlbench_adapter.py 中修改 Observation 结构
+@dataclass
+class CustomObservation:
+    # 添加新的字段
+    ...
+```
+
+### 调试技巧
+
+**打印详细日志**：
+```python
+# 在配置文件中启用详细日志
+piper:
+  log_level: "DEBUG"
+```
+
+**单步调试**：
+```python
+# 在主脚本中设置断点
+import pdb; pdb.set_trace()
+```
+
+## 参考资料
+
+- [pyAgxArm SDK 文档](../../pyAgxArm/)
+- [RLBench 论文](https://arxiv.org/abs/1909.12271)
+- [RealSense SDK](https://github.com/IntelRealSense/librealsense)
+
+## 更新日志
+
+### v1.0.0 (2026-07-02)
+- 完整的主从数据采集系统
+- RLBench 格式适配（6关节版本）
+- 数据清洗工具
+- 交互式录制控制
+
+## 联系方式
+
+如有问题或建议，请联系开发团队。
 
 ---
 
-# pyAgxArm 使用说明
-
-> `pyAgxArm` 是 AgileX 机械臂与末端执行器的 Python SDK，支持 CAN 通信、状态读取、运动控制，以及 Piper、Nero、AgxGripper、Revo2 等设备的接口调用。
-
-## 目录
-
-- [切换到 English](#pyagxarm-user-guide)
-- [简介](#pyagxarm-使用说明)
-- [环境支持](#环境支持)
-- [文档入口](#文档入口)
-- [安装方法](#安装方法)
-- [通信激活](#通信激活)
-- [快速开始](#快速开始)
-- [注意事项](#注意事项)
-- [联系我们](#联系我们)
-
-## 环境支持
-
-- Ubuntu：`18.04 / 20.04 / 22.04 / 24.04`
-- Windows：`10 / 11`
-- macOS (Darwin)
-- Python：`3.6` 及以上（目前适配至 `3.14`）
-
-## 文档入口
-
-| 说明 | 文档 |
-| --- | --- |
-| GitHub 讨论区 | [全部](https://github.com/agilexrobotics/pyAgxArm/discussions) · [公告](https://github.com/agilexrobotics/pyAgxArm/discussions/categories/announcements) · [综合](https://github.com/agilexrobotics/pyAgxArm/discussions/categories/general) · [问答](https://github.com/agilexrobotics/pyAgxArm/discussions/categories/q-a) |
-| ROS | [agx_arm_ros](https://github.com/agilexrobotics/agx_arm_ros) |
-| Piper API | [docs/piper/piper_api.md](./docs/piper/piper_api.md#piper-机械臂-api-使用文档) |
-| Nero API | [docs/nero/nero_api.md](./docs/nero/nero_api.md#nero-机械臂-api-使用文档) |
-| AgxGripper API | [docs/effector/agx_gripper/agx_gripper_api.md](./docs/effector/agx_gripper/agx_gripper_api.md#agxgripper-夹爪-api-使用文档) |
-| Revo2 API | [docs/effector/revo2/revo2_api.md](./docs/effector/revo2/revo2_api.md#revo2-灵巧手-api-使用文档) |
-| Revo2 Touch API | [docs/effector/revo2_touch/revo2_touch_api.md](./docs/effector/revo2_touch/revo2_touch_api.md#revo2-touch-灵巧手-api-使用文档) |
-| CAN 模块手册 | [docs/can_user.md](./docs/can_user.md#can-模块使用手册) |
-| Nero 首次使用 CAN 指南 | [docs/nero/first_time_user_guide_can.md](./docs/nero/first_time_user_guide_can.md#nero-首次使用指南can) |
-| WSL2 USB-CAN 使用指南 | [docs/wsl2_usb_can_guide.md](./docs/wsl2_usb_can_guide.md#wsl2-ubuntu-2204-连接-usb-can-模块完整指南) |
-| Ubuntu 24.04 pip 安装说明 | [docs/ubuntu_24_04_pip_install.md](./docs/ubuntu_24_04_pip_install.md#ubuntu-2404-安装第三方-pip-包的方法) |
-| 更新日志 | [CHANGELOG.md](./CHANGELOG.md#更新日志) |
-| 示例代码 | [pyAgxArm/demos](./pyAgxArm/demos) |
-
-## 安装方法
-
-```shell
-pip3 install python-can
-```
-
-`python-can` 版本应高于 `3.3.4`。
-
-如果你想在 Windows 上使用本 SDK，必须先安装 `python-can-agx-cando` 插件，并使用 `agx_cando` 接口。推荐直接安装：
-
-```shell
-pip3 install "git+https://github.com/agilexrobotics/python-can-agx-cando.git"
-```
-
-也可以克隆源码后在本地安装：
-
-```shell
-git clone https://github.com/agilexrobotics/python-can-agx-cando.git
-cd python-can-agx-cando
-pip3 install .
-```
-
-然后再安装 `pyAgxArm`。推荐直接通过 GitHub 安装：
-
-```shell
-pip3 install "git+https://github.com/agilexrobotics/pyAgxArm.git"
-```
-
-也可以克隆源码后在本地安装：
-
-```shell
-git clone https://github.com/agilexrobotics/pyAgxArm.git
-cd pyAgxArm
-pip3 install .
-```
-
-Ubuntu 24.04 可参考：
-[docs/ubuntu_24_04_pip_install.md](./docs/ubuntu_24_04_pip_install.md#ubuntu-2404-安装第三方-pip-包的方法)
-
-## 通信激活
-
-详见：
-[docs/can_user.md](./docs/can_user.md#can-模块使用手册)
-
-## 快速开始
-
-本节快速示例按“默认通道”假设：
-
-- Windows：`interface="agx_cando"`，`channel="0"`
-- Linux：`interface="socketcan"`，`channel="can0"`
-- macOS：`interface="slcan"`，`channel="/dev/ttyACM0"`
-
-运行前前置条件：
-
-- Linux：先激活 CAN（例如：`sudo ip link set can0 up type can bitrate 1000000`）
-- Linux：也可使用我们提供的脚本，见 [CAN 模块手册 - 激活单个 CAN 模块](./docs/can_user.md#2-激活单个-can-模块)
-- macOS：先给串口权限（`sudo chmod 777 /dev/ttyACM0`）
-
-```python
-import time
-from platform import system
-from pyAgxArm import create_agx_arm_config, AgxArmFactory, ArmModel, NeroFW
-
-# Nero 固件：≤ 1.10 选 NeroFW.DEFAULT；1.11 选 NeroFW.V111；1.12 选 NeroFW.V112；≥ 1.20 选 NeroFW.V120。
-platform_system = system()
-if platform_system == "Windows":
-    interface = "agx_cando"
-    channel = "0"
-elif platform_system == "Linux":
-    interface = "socketcan"
-    channel = "can0"
-elif platform_system == "Darwin":
-    interface = "slcan"
-    channel = "/dev/ttyACM0"
-else:
-    raise RuntimeError("pyAgxArm 当前公开说明包含 Linux `socketcan`、Windows `agx_cando` 与 macOS `slcan`。")
-
-cfg = create_agx_arm_config(
-    robot=ArmModel.NERO,
-    firmeware_version=NeroFW.DEFAULT,
-    interface=interface,
-    channel=channel,
-)
-robot = AgxArmFactory.create_arm(cfg)
-robot.connect()
-
-while True:
-    ja = robot.get_joint_angles()
-    if ja is not None:
-        print(ja.msg)
-        print(ja.hz, ja.timestamp)
-    time.sleep(0.005)
-```
-
-## 注意事项
-
-- 使用 CAN 协议时，需要先激活 CAN 设备并设置正确波特率。
-- Windows 下使用 `interface="agx_cando"` 前，需要先单独安装 `python-can-agx-cando` 插件。
-- macOS（`Darwin`）下使用 `interface="slcan"` 前，需要先给予串口权限。
-- MIT 单关节控制属于高级功能，使用不当可能损坏机械臂。
-
-## 联系我们
-
-- [GitHub 讨论区](https://github.com/agilexrobotics/pyAgxArm/discussions)（公告、问答、想法交流与社区讨论）
-- [GitHub Issues](https://github.com/agilexrobotics/pyAgxArm/issues)（缺陷、功能建议、文档等问题反馈与跟踪）
-- 邮箱：[support@agilex.ai](mailto:support@agilex.ai)（固件、上位机、工具包及售后支持等）
-- Discord：<https://discord.gg/wrKYTxwDBd>（实时聊天与社区互助）
+**Happy Data Collection! 🎉**

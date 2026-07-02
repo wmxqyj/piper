@@ -176,14 +176,14 @@ class PiperDataCollector:
         except Exception as e:
             print(f"录制回调异常: {e}")
 
-    def save_episode(self, task_name: str, episode_idx: int, variation_idx: int = 0):
+    def save_episode(self, task_config: dict, episode_idx: int, variation_idx: int = 0):
         """
         保存录制的 episode
 
         Parameters
         ----------
-        task_name : str
-            任务名称
+        task_config : dict
+            任务配置字典，包含 name 和 descriptions
         episode_idx : int
             episode 编号
         variation_idx : int
@@ -193,9 +193,15 @@ class PiperDataCollector:
             print("没有录制的数据")
             return
 
+        task_name = task_config['name']
+        descriptions = task_config['descriptions']
+
         print("\n" + "=" * 60)
         print("保存 Episode...")
         print("=" * 60)
+        print(f"任务名称: {task_name}")
+        print(f"Episode: {episode_idx}")
+        print(f"语言指令: {descriptions}")
 
         # 检查是否已存在
         save_path = os.path.join(
@@ -224,9 +230,7 @@ class PiperDataCollector:
         base_save_path = os.path.join(self.config['demo']['save_path'], task_name)
         self.rlbench_adapter.save_demo(demo, base_save_path, episode_idx)
 
-        # 保存语言目标
-        lang_goal = input("请输入语言目标描述: ")
-        descriptions = lang_goal.split(",")
+        # 保存语言目标（从配置文件读取）
         descriptions_path = os.path.join(save_path, 'variation_descriptions.pkl')
         with open(descriptions_path, 'wb') as f:
             import pickle
@@ -239,7 +243,43 @@ class PiperDataCollector:
         print("\n" + "=" * 60)
         print("进入交互式录制模式")
         print("=" * 60)
-        print("操作说明:")
+
+        # 显示可用的任务列表
+        print("\n可用任务列表:")
+        tasks = self.config.get('tasks', [])
+        for i, task in enumerate(tasks):
+            print(f"  [{i}] {task['name']}: {task['descriptions']}")
+
+        # 让用户选择任务
+        print("\n选择任务:")
+        task_idx = input(f"输入任务编号 (0-{len(tasks)-1}): ")
+        try:
+            task_idx = int(task_idx)
+            if 0 <= task_idx < len(tasks):
+                selected_task = tasks[task_idx]
+            else:
+                print("无效的任务编号，使用第一个任务")
+                selected_task = tasks[0]
+        except ValueError:
+            print("无效的输入，使用第一个任务")
+            selected_task = tasks[0]
+
+        # 从任务配置中获取参数
+        task_name = selected_task['name']
+        episode_idx = selected_task.get('episode_start', 0)
+        variation_idx = self.config['demo']['variation']
+
+        print("\n" + "=" * 60)
+        print("任务配置:")
+        print("=" * 60)
+        print(f"任务名称: {task_name}")
+        print(f"语言指令: {selected_task['descriptions']}")
+        print(f"起始Episode: {episode_idx}")
+        print(f"Variation: {variation_idx}")
+        print("=" * 60)
+
+        # 操作说明
+        print("\n操作说明:")
         print("  - 拖动主臂进行示教")
         print("  - 按 's' 开始录制")
         print("  - 按 'q' 停止录制")
@@ -247,25 +287,6 @@ class PiperDataCollector:
         print("  - 按 'n' 丢弃数据")
         print("  - 按 Ctrl+C 安全退出")
         print("=" * 60)
-
-        task_name = self.config['demo']['task']
-        episode_idx = self.config['demo']['episode']
-        variation_idx = self.config['demo']['variation']
-
-        print(f"\n当前任务: {task_name}")
-        print(f"Episode: {episode_idx}")
-        print(f"Variation: {variation_idx}")
-
-        # 提示输入新的参数（可选）
-        resp = input("是否修改任务名称/episode编号？(y/n): ")
-        if resp.lower() == 'y':
-            task_name = input(f"任务名称 (默认: {task_name}): ") or task_name
-            episode_input = input(f"Episode 编号 (默认: {episode_idx}): ")
-            if episode_input:
-                episode_idx = int(episode_input)
-            variation_input = input(f"Variation 编号 (默认: {variation_idx}): ")
-            if variation_input:
-                variation_idx = int(variation_input)
 
         # 启动主从控制循环（不带录制）
         print("\n启动主从控制（等待录制命令）...")
@@ -292,7 +313,8 @@ class PiperDataCollector:
                     self.is_recording = True
                     self.recorded_frames.clear()
                     self.sync_manager.clear_buffer()
-                    print("录制已开始，拖动主臂进行示教...")
+                    print(f"录制已开始，拖动主臂进行示教...")
+                    print(f"当前任务: {task_name} | Episode: {episode_idx}")
 
                 elif cmd == 'q':
                     # 停止录制
@@ -302,8 +324,9 @@ class PiperDataCollector:
                     if len(self.recorded_frames) > 0:
                         resp = input("保存数据？(y/n): ")
                         if resp.lower() == 'y':
-                            self.save_episode(task_name, episode_idx, variation_idx)
+                            self.save_episode(selected_task, episode_idx, variation_idx)
                             episode_idx += 1  # 自动递增
+                            print(f"\n下一个 Episode 编号: {episode_idx}")
                         else:
                             print("数据已丢弃")
 
