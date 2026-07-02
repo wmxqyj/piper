@@ -1,0 +1,59 @@
+# Piper 双臂主从数据采集配置文件
+
+# 机械臂配置
+piper:
+  leader_can: "can_piper_l"  # 主臂 CAN 通道
+  follower_can: "can_piper_r"  # 从臂 CAN 通道
+  arm_model: "piper"  # 机械臂型号
+  firmware_version: "default"  # 固件版本
+  control_frequency: 50  # 控制频率 Hz
+  joint_nums: 6  # 关节数量
+
+# 末端执行器配置
+effector:
+  type: "agx_gripper"  # 夹爪类型
+  enabled: true  # 是否启用夹爪跟随
+
+# 相机配置
+camera:
+  type: "realsense"  # 相机类型
+  resolution:
+    width: 640
+    height: 480
+  fps: 30  # 帧率
+  depth_scale: 0.001  # 深度比例因子
+  align_depth: true  # 是否对齐深度到彩色
+
+# 录制配置
+recording:
+  frequency: 50  # 录制频率 Hz
+  buffer_size: 1000  # 缓冲区大小
+  auto_start: false  # 是否自动开始录制
+
+# 数据保存配置
+demo:
+  save_path: "/home/siat/data/piper_demos"  # 保存路径
+  task: "task_name"  # 任务名称
+  episode: 0  # episode 编号
+  variation: 0  # variation 编号
+  random_seed: 42  # 随机种子
+
+# 交互配置
+interaction:
+  ask_to_save: true  # 是否询问保存
+  show_preview: false  # 是否显示预览
+  key_start: "s"  # 开始录制按键
+  key_stop: "q"  # 停止录制按键
+  key_save: "y"  # 保存按键
+  key_discard: "n"  # 丢弃按键
+
+# RLBench 格式配置（6关节版本）
+rlbench:
+  joint_nums: 6  # 关节数量
+  camera_names: ["front"]  # 相机名称列表
+  misc_keys:  # misc 中需要保存的键
+    - "front_camera_intrinsics"
+    - "front_camera_extrinsics"
+    - "front_camera_near"
+    - "front_camera_far"
+    - "keypoint_idxs"
