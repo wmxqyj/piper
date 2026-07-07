@@ -1,19 +1,42 @@
 """
-PyRealSense 相机接口封装
+相机接口封装
 
-提供 RGB-D 相机的数据获取功能
+提供 RGB-D 相机的数据获取功能，支持 RealSense 和 Orbbec 相机
 """
 
 import numpy as np
 import time
+import threading
 from typing import Optional, Dict, Any, Tuple
 from dataclasses import dataclass
 
 try:
     import pyrealsense2 as rs
 except ImportError:
-    print("请安装 pyrealsense2: pip install pyrealsense2")
     rs = None
+
+try:
+    from pyorbbecsdk import (
+        Context as OBContext,
+        Pipeline as OBPipeline,
+        Config as OBConfig,
+        OBFormat,
+        OBSensorType,
+        OBError,
+        OBLogLevel,
+        AlignFilter,
+        OBStreamType,
+    )
+except ImportError:
+    OBContext = None
+    OBPipeline = None
+    OBConfig = None
+    OBFormat = None
+    OBSensorType = None
+    OBError = None
+    OBLogLevel = None
+    AlignFilter = None
+    OBStreamType = None
 
 
 @dataclass
@@ -252,42 +275,231 @@ class RealSenseInterface:
         return (result[0], result[1], result[2])
 
 
-# 测试代码
-if __name__ == '__main__':
-    # 示例配置
-    config = {
-        'resolution': {'width': 640, 'height': 480},
-        'fps': 30,
-        'depth_scale': 0.001,
-        'align_depth': True
+class OrbbecInterface:
+    """Orbbec 相机接口 (DC1 / DaBai 系列)"""
+
+    _LOG_LEVEL_MAP = {
+        'DEBUG': OBLogLevel.DEBUG,
+        'INFO': OBLogLevel.INFO,
+        'WARNING': OBLogLevel.WARNING,
+        'ERROR': OBLogLevel.ERROR,
+        'FATAL': OBLogLevel.FATAL,
+        'NONE': OBLogLevel.NONE,
     }
 
-    # 创建接口
-    camera = RealSenseInterface(config)
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+        self.pipeline = None
+        self.device = None
+        self.is_initialized = False
 
-    # 连接
-    if camera.connect():
+        self.width = config.get('resolution', {}).get('width', 640)
+        self.height = config.get('resolution', {}).get('height', 480)
+        self.fps = config.get('fps', 15)
+        self.depth_scale = config.get('depth_scale', 0.001)
+        self.align_depth = config.get('align_depth', True)
+        self.log_level_str = config.get('log_level', 'WARNING').upper()
+
+        self.intrinsics = None
+
+        # 后台采集线程 & 帧缓存（避免阻塞调用端）
+        self._capture_thread = None
+        self._running = False
+        self._latest_frame = None
+        self._frame_lock = threading.Lock()
+        self._align_filter = None
+
+    def connect(self) -> bool:
+        if OBPipeline is None:
+            print("pyorbbecsdk 未安装: pip install pyorbbecsdk")
+            return False
+
         try:
-            # 测试获取数据
-            for i in range(10):
-                data = camera.get_camera_data()
-                if data is not None:
-                    print(f"帧 {i}:")
-                    print(f"  时间: {data.timestamp:.3f}")
-                    print(f"  RGB 尺寸: {data.rgb_image.shape}")
-                    print(f"  深度尺寸: {data.depth_image.shape}")
-                    print(f"  内参矩阵: {data.camera_intrinsics}")
+            log_level = self._LOG_LEVEL_MAP.get(self.log_level_str, OBLogLevel.WARNING)
+            OBContext.set_logger_level(log_level)
+            OBContext.set_logger_to_file(OBLogLevel.NONE, "")
+            OBContext.set_logger_to_console(log_level)
 
-                    # 测试深度值
-                    center_x = data.rgb_image.shape[1] // 2
-                    center_y = data.rgb_image.shape[0] // 2
-                    depth = camera.get_depth_at_pixel(data.depth_image, center_x, center_y)
-                    print(f"  中心深度: {depth:.3f} m")
+            self.pipeline = OBPipeline()
+            self.device = self.pipeline.get_device()
+            device_info = self.device.get_device_info()
+            print(f"Orbbec 设备: {device_info.get_name()}, PID: {hex(device_info.get_pid())}")
 
-                    time.sleep(0.1)
+            config = OBConfig()
 
-        except KeyboardInterrupt:
-            print("停止测试")
+            try:
+                depth_profiles = self.pipeline.get_stream_profile_list(OBSensorType.DEPTH_SENSOR)
+                if depth_profiles is not None:
+                    depth_profile = depth_profiles.get_default_video_stream_profile()
+                    print(f"深度流: {depth_profile.get_width()}x{depth_profile.get_height()} @ {depth_profile.get_fps()}fps")
+                    config.enable_stream(depth_profile)
+            except Exception as e:
+                print(f"深度流配置失败: {e}")
 
-        finally:
-            camera.cleanup()
+            try:
+                color_profiles = self.pipeline.get_stream_profile_list(OBSensorType.COLOR_SENSOR)
+                if color_profiles is not None:
+                    color_profile = color_profiles.get_default_video_stream_profile()
+                    print(f"彩色流: {color_profile.get_width()}x{color_profile.get_height()} @ {color_profile.get_fps()}fps, format: {color_profile.get_format()}")
+                    config.enable_stream(color_profile)
+            except Exception as e:
+                print(f"彩色流配置失败: {e}")
+
+            try:
+                self.pipeline.enable_frame_sync()
+            except Exception:
+                print("[INFO] DC1 不支持硬件帧同步，使用软件同步")
+
+            self.pipeline.start(config)
+
+            self._load_intrinsics()
+
+            # 创建对齐滤波器（DC1/Gemini 330 使用 AlignFilter 而非 set_align_mode）
+            self._align_filter = AlignFilter(align_to_stream=OBStreamType.COLOR_STREAM) if self.align_depth else None
+
+            # 启动后台采集线程
+            self._running = True
+            self._capture_thread = threading.Thread(target=self._capture_loop, daemon=True)
+            self._capture_thread.start()
+
+            self.is_initialized = True
+            print("Orbbec 相机已连接")
+            return True
+
+        except Exception as e:
+            print(f"Orbbec 相机连接失败: {e}")
+            return False
+
+    def _load_intrinsics(self):
+        try:
+            camera_param = self.pipeline.get_camera_param()
+            rgb_intrinsic = camera_param.rgb_intrinsic
+            self.intrinsics = rgb_intrinsic
+            print(f"相机内参:")
+            print(f"  分辨率: {rgb_intrinsic.width} x {rgb_intrinsic.height}")
+            print(f"  焦距: fx={rgb_intrinsic.fx}, fy={rgb_intrinsic.fy}")
+            print(f"  主点: cx={rgb_intrinsic.cx}, cy={rgb_intrinsic.cy}")
+        except Exception as e:
+            print(f"获取相机内参失败: {e}")
+            self.intrinsics = None
+
+    def _capture_loop(self):
+        """后台采集线程：持续拉取帧并缓存最新一帧"""
+        import cv2
+        while self._running:
+            try:
+                frames = self.pipeline.wait_for_frames(500)
+                if frames is None:
+                    continue
+
+                # DC1/Gemini 330 使用 AlignFilter 进行后处理对齐
+                if self._align_filter is not None:
+                    frames = self._align_filter.process(frames)
+                    if frames is None:
+                        continue
+
+                color_frame = frames.get_color_frame()
+                depth_frame = frames.get_depth_frame()
+                if color_frame is None or depth_frame is None:
+                    continue
+
+                color_image = self._frame_to_bgr_image(color_frame)
+                if color_image is None:
+                    continue
+
+                depth_width = depth_frame.get_width()
+                depth_height = depth_frame.get_height()
+                depth_data = np.frombuffer(depth_frame.get_data(), dtype=np.uint16)
+                depth_image = depth_data.reshape((depth_height, depth_width)).astype(np.float32)
+                depth_image *= depth_frame.get_depth_scale()
+
+                camera_intrinsics = self.get_intrinsics_matrix()
+                camera_extrinsics = np.eye(4)
+
+                frame = CameraData(
+                    timestamp=time.time(),
+                    rgb_image=color_image,
+                    depth_image=depth_image,
+                    camera_intrinsics=camera_intrinsics,
+                    camera_extrinsics=camera_extrinsics,
+                )
+
+                with self._frame_lock:
+                    self._latest_frame = frame
+
+            except Exception as e:
+                if self._running:
+                    print(f"[WARN] 相机采集线程异常: {e}")
+
+    def get_intrinsics_matrix(self) -> np.ndarray:
+        if self.intrinsics is None:
+            return np.eye(3)
+        return np.array([
+            [self.intrinsics.fx, 0, self.intrinsics.cx],
+            [0, self.intrinsics.fy, self.intrinsics.cy],
+            [0, 0, 1]
+        ])
+
+    @staticmethod
+    def _frame_to_bgr_image(frame) -> Optional[np.ndarray]:
+        import cv2
+        width = frame.get_width()
+        height = frame.get_height()
+        fmt = frame.get_format()
+        data = np.asanyarray(frame.get_data())
+
+        if fmt == OBFormat.RGB:
+            image = data.reshape((height, width, 3))
+            return cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        elif fmt == OBFormat.BGR:
+            return data.reshape((height, width, 3))
+        elif fmt == OBFormat.MJPG:
+            return cv2.imdecode(data, cv2.IMREAD_COLOR)
+        elif fmt == OBFormat.YUYV:
+            image = data.reshape((height, width, 2))
+            return cv2.cvtColor(image, cv2.COLOR_YUV2BGR_YUYV)
+        elif fmt == OBFormat.UYVY:
+            image = data.reshape((height, width, 2))
+            return cv2.cvtColor(image, cv2.COLOR_YUV2BGR_UYVY)
+        else:
+            print(f"不支持的彩色格式: {fmt}")
+            return None
+
+    def get_camera_data(self) -> Optional[CameraData]:
+        if not self.is_initialized:
+            return None
+        with self._frame_lock:
+            return self._latest_frame
+
+    def cleanup(self):
+        # 停止后台采集线程
+        self._running = False
+        if self._capture_thread is not None and self._capture_thread.is_alive():
+            self._capture_thread.join(timeout=2.0)
+        try:
+            if self.pipeline is not None:
+                print("停止 Orbbec 相机...")
+                self.pipeline.stop()
+                print("Orbbec 相机已停止")
+        except Exception as e:
+            print(f"相机清理异常: {e}")
+
+    def get_depth_at_pixel(self, depth_image: np.ndarray, x: int, y: int) -> float:
+        return float(depth_image[y, x])
+
+    def deproject_pixel_to_point(self, depth_image: np.ndarray, x: int, y: int) -> Tuple[float, float, float]:
+        if self.intrinsics is None:
+            return (0.0, 0.0, 0.0)
+        depth = self.get_depth_at_pixel(depth_image, x, y)
+        x_3d = (x - self.intrinsics.cx) * depth / self.intrinsics.fx
+        y_3d = (y - self.intrinsics.cy) * depth / self.intrinsics.fy
+        return (x_3d, y_3d, depth)
+
+
+def create_camera_interface(config: Dict[str, Any]):
+    """相机接口工厂函数"""
+    camera_type = config.get('type', 'realsense')
+    if camera_type == 'orbbec':
+        return OrbbecInterface(config)
+    else:
+        return RealSenseInterface(config)

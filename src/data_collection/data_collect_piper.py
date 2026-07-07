@@ -12,7 +12,7 @@ import shutil
 from pathlib import Path
 
 from piper_interface import PiperInterface, PiperArmState
-from camera_interface import RealSenseInterface, CameraData
+from camera_interface import RealSenseInterface, OrbbecInterface, CameraData, create_camera_interface
 from data_sync import DataSyncManager, SyncedFrame
 from rlbench_adapter import RLBenchAdapter
 
@@ -74,8 +74,9 @@ class PiperDataCollector:
                 return False
 
             # 2. 初始化相机接口
-            print("\n[2/4] 初始化 RealSense 相机...")
-            self.camera_interface = RealSenseInterface(self.config['camera'])
+            camera_type = self.config['camera'].get('type', 'realsense')
+            print(f"\n[2/4] 初始化 {camera_type} 相机...")
+            self.camera_interface = create_camera_interface(self.config['camera'])
 
             if not self.camera_interface.connect():
                 print("相机初始化失败，尝试继续...")

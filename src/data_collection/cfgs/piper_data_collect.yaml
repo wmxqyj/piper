@@ -16,17 +16,18 @@ effector:
 
 # 相机配置
 camera:
-  type: "realsense"  # 相机类型
+  type: "orbbec"  # 相机类型
   resolution:
     width: 640
     height: 480
   fps: 30  # 帧率
   depth_scale: 0.001  # 深度比例因子
   align_depth: true  # 是否对齐深度到彩色
+  log_level: "WARNING"  # Orbbec SDK 日志级别: DEBUG, INFO, WARNING, ERROR, NONE
 
 # 录制配置
 recording:
-  frequency: 50  # 录制频率 Hz
+  frequency: 10  # 录制频率 Hz
   buffer_size: 1000  # 缓冲区大小
   auto_start: false  # 是否自动开始录制
 
@@ -51,7 +52,7 @@ tasks:
 
 # 数据保存配置
 demo:
-  save_path: "/home/siat/data/piper_demos"  # 保存路径
+  save_path: "/home/siat/qyj/program/pyAgxArm/data"  # 保存路径
   variation: 0  # variation 编号
   random_seed: 42  # 随机种子
 

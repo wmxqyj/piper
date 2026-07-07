@@ -92,14 +92,38 @@ class PiperInterface:
             if self.config.get('effector', {}).get('enabled', True):
                 self._init_effectors()
 
-            # 使能
+            # 使能主臂
             print("使能主臂...")
+            leader_retry = 0
             while not self.leader_robot.enable():
                 time.sleep(0.01)
+                leader_retry += 1
+                if leader_retry % 500 == 0:
+                    # 诊断：打印各关节使能状态
+                    try:
+                        status_list = self.leader_robot.get_joints_enable_status_list()
+                        print(f"  主臂使能重试中... ({leader_retry * 0.01:.1f}s)")
+                        print(f"  关节使能状态: {status_list}")
+                    except Exception as e:
+                        print(f"  主臂使能重试中... ({leader_retry * 0.01:.1f}s)")
+                        print(f"  CAN通信异常: {e}")
+                        print(f"  请检查: 1)CAN接口是否UP 2)通道名是否正确 3)机械臂是否上电")
 
+            # 使能从臂
             print("使能从臂...")
+            follower_retry = 0
             while not self.follower_robot.enable():
                 time.sleep(0.01)
+                follower_retry += 1
+                if follower_retry % 500 == 0:
+                    try:
+                        status_list = self.follower_robot.get_joints_enable_status_list()
+                        print(f"  从臂使能重试中... ({follower_retry * 0.01:.1f}s)")
+                        print(f"  关节使能状态: {status_list}")
+                    except Exception as e:
+                        print(f"  从臂使能重试中... ({follower_retry * 0.01:.1f}s)")
+                        print(f"  CAN通信异常: {e}")
+                        print(f"  请检查: 1)CAN接口是否UP 2)通道名是否正确 3)机械臂是否上电")
 
             print("两臂已使能")
 

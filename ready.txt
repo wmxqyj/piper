@@ -1,4 +1,4 @@
-bash pyAgxArm/scripts/ubuntu/find_all_can_port.sh
+bash find_all_can_port.sh
 
-bash can_activate.sh can_piper_l 1000000 "3-6:1.0"
-bash can_activate.sh can_piper_r 1000000 "3-9:1.0"
+bash can_activate.sh can_piper_l 1000000 "3-3:1.0"
+bash can_activate.sh can_piper_r 1000000 "3-7:1.0"

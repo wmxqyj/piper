@@ -10,3 +10,6 @@ build
 *.so
 temp
 .pytest_cache/
+Log/
+examples/
+data/
