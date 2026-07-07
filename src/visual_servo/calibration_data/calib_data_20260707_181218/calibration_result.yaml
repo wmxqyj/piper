@@ -1,0 +1,30 @@
+calibration_result: {algorithm: tsai_lenz, num_samples: 15, rot_error_deg_mean: 4.698718357143205,
+  rot_error_deg_std: 2.863497569636282, trans_error_m_mean: 0.026536852791927766,
+  trans_error_m_std: 0.01575868928060577, position_std_mm: 12.860361800777456}
+gripper_T_cam:
+  matrix:
+  - [-0.31121834489114353, 0.9349231419201506, 0.17047539560115813, -0.055275626215632694]
+  - [-0.9501346498842658, -0.3023897759944047, -0.0761877317115911, 0.028890941726091454]
+  - [-0.019679656819178555, -0.18568560007767995, 0.9824121177139825, 0.029923919980886178]
+  - [0.0, 0.0, 0.0, 1.0]
+  pose6:
+    x_m: !!python/object/apply:numpy.core.multiarray.scalar
+    - &id001 !!python/object/apply:numpy.dtype
+      args: [f8, false, true]
+      state: !!python/tuple [3, <, null, null, null, -1, -1, 0]
+    - !!binary |
+      R2C5PRZNrL8=
+    y_m: !!python/object/apply:numpy.core.multiarray.scalar
+    - *id001
+    - !!binary |
+      DPJ0R5aVnT8=
+    z_m: !!python/object/apply:numpy.core.multiarray.scalar
+    - *id001
+    - !!binary |
+      4n2+RmCknj8=
+    roll_rad: -0.1868061547544724
+    pitch_rad: 0.01968092732603073
+    yaw_rad: -1.8873345362518401
+    roll_deg: -10.703204254498987
+    pitch_deg: 1.1276340726852536
+    yaw_deg: -108.1363034565109

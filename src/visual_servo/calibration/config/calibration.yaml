@@ -2,8 +2,8 @@
 
 # 棋盘格参数（请根据实际棋盘格修改）
 chessboard:
-  pattern_size: [9, 6]          # 内角点数 (宽, 高)
-  square_size_mm: 25.0           # 每个方格边长 (毫米)
+  pattern_size: [11, 8]          # 内角点数 (宽, 高)
+  square_size_mm: 10.0           # 每个方格边长 (毫米)
 
 # 相机参数
 camera:
@@ -18,7 +18,7 @@ camera:
 
 # 机械臂参数
 robot:
-  can_channel: "can_piper_l"    # CAN 通道
+  can_channel: "can_piper_r"    # CAN 通道
   arm_model: "piper"            # 机械臂型号
   firmware_version: "default"   # 固件版本
   joint_nums: 6                 # 关节数量

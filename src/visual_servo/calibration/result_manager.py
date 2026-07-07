@@ -107,7 +107,7 @@ class CalibrationResultManager:
         print(f"  YAML: {filepath}")
         print(f"  NumPy: {np_path}")
         print(f"  矩阵 (gripper_T_cam):")
-        self._print_matrix(result.gripper_T_cam)
+        CalibrationResultManager._print_matrix(result.gripper_T_cam)
 
         return filepath
 

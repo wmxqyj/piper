@@ -11,6 +11,7 @@
 """
 
 import os
+import sys
 import cv2
 import yaml
 import time
@@ -20,7 +21,12 @@ from datetime import datetime
 
 from pyAgxArm import create_agx_arm_config, AgxArmFactory
 
-from ..camera_interface import OrbbecInterface
+# 确保 src 目录在路径中，以便引入 data_collection.camera_interface
+_src_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _src_dir not in sys.path:
+    sys.path.insert(0, _src_dir)
+
+from data_collection.camera_interface import OrbbecInterface
 from .board_detector import ChessboardDetector
 from .solver import HandEyeSolver
 from .result_manager import CalibrationResult, CalibrationResultManager
@@ -134,12 +140,34 @@ class HandEyeDataCollector:
             return False
 
     def _get_robot_pose(self) -> Optional[np.ndarray]:
-        """获取机械臂末端法兰在基坐标系下的位姿"""
+        """
+        获取机械臂末端法兰在基坐标系下的位姿
+
+        在 leader（重力补偿拖动）模式下不能使用 get_flange_pose()，
+        需要先用 get_leader_joint_angles() 获取实际关节角度，
+        再用 FK 正运动学计算末端位姿。
+        """
         try:
-            pose_msg = self.robot.get_flange_pose()
-            if pose_msg is None or pose_msg.msg is None:
+            # 1. 获取 leader 模式下的实际关节角度
+            joint_msg = self.robot.get_leader_joint_angles()
+            if joint_msg is None or joint_msg.msg is None:
+                print("  [WARN] get_leader_joint_angles() 返回空")
+                # 降级尝试 get_flange_pose
+                pose_msg = self.robot.get_flange_pose()
+                if pose_msg is not None and pose_msg.msg is not None:
+                    return np.array(pose_msg.msg)
                 return None
-            return np.array(pose_msg.msg)  # [x, y, z, roll, pitch, yaw]
+
+            joint_angles = joint_msg.msg  # list[float]
+
+            # 2. 用 FK 正运动学计算法兰位姿
+            flange_pose = self.robot.fk(joint_angles)
+            if flange_pose is None:
+                print("  [WARN] FK 计算返回空")
+                return None
+
+            return np.array(flange_pose)  # [x, y, z, roll, pitch, yaw]
+
         except Exception as e:
             print(f"获取机械臂位姿失败: {e}")
             return None
@@ -197,6 +225,9 @@ class HandEyeDataCollector:
             # 绘制检测结果
             display = self.detector.draw_corners(frame, corners, self.pattern_size, success)
 
+            # 获取当前机械臂位姿（用于实时显示）
+            current_pose = self._get_robot_pose()
+
             # 显示状态信息
             status_color = (0, 255, 0) if success else (0, 0, 255)
             status_text = "Board detected" if success else "No board"
@@ -208,6 +239,19 @@ class HandEyeDataCollector:
                 display, f"Saved: {len(self.collected_data)}/{self.num_target}",
                 (10, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2,
             )
+
+            # 实时显示当前机器人位姿
+            if current_pose is not None:
+                pos_str = f"pos: ({current_pose[0]:.3f}, {current_pose[1]:.3f}, {current_pose[2]:.3f})"
+                rpy_str = f"rpy: ({np.degrees(current_pose[3]):.1f}, {np.degrees(current_pose[4]):.1f}, {np.degrees(current_pose[5]):.1f})"
+                cv2.putText(
+                    display, pos_str, (10, 100),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2,
+                )
+                cv2.putText(
+                    display, rpy_str, (10, 125),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2,
+                )
 
             if success and corners is not None:
                 # 进一步计算棋盘格位姿
