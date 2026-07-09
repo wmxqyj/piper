@@ -1,0 +1,37 @@
+# 手眼标定验证配置
+
+# 红色方块检测参数
+red_block:
+  # 红色在 HSV 空间有两个区间（红在0°和180°附近）
+  hsv_range1_low: [0, 100, 100]
+  hsv_range1_high: [10, 255, 255]
+  hsv_range2_low: [160, 100, 100]
+  hsv_range2_high: [179, 255, 255]
+  min_area: 300                # 最小轮廓面积（像素），过滤噪声
+  max_area: 50000              # 最大轮廓面积
+
+# 抓取偏移
+grasp_offset_z: 0.03           # 方块顶面到相机估计位置的 Z 偏移（米）
+
+# 机器人运动参数
+robot:
+  can_channel: "can_piper_r"   # CAN 通道（根据实际情况修改）
+  arm_model: "piper"           # 机械臂型号
+  firmware_version: "default"  # 固件版本
+  joint_nums: 6                # 关节数量
+  pre_grasp_offset_z: 0.10     # 目标位置上方偏移（米）
+  speed: 0.2                   # 运动速度
+
+# 标定结果路径
+calibration_result_path: ""     # 留空则自动查找最近一次标定结果
+
+# 相机配置
+camera:
+  type: "orbbec"
+  resolution:
+    width: 640
+    height: 480
+  fps: 15
+  depth_scale: 0.001
+  align_depth: true
+  log_level: "WARNING"

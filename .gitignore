@@ -13,3 +13,5 @@ temp
 Log/
 examples/
 data/
+src/visual_servo/dataset/
+runs/

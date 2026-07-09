@@ -90,12 +90,21 @@ class HandEyeDataCollector:
             print("机械臂已连接")
 
             print("使能机械臂...")
-            retry = 0
-            while not self.robot.enable():
+            enable_ok = False
+            for retry_attempt in range(2000):  # ~20s timeout
+                if self.robot.enable():
+                    enable_ok = True
+                    break
                 time.sleep(0.01)
-                retry += 1
-                if retry % 500 == 0:
-                    print(f"  等待使能... ({retry * 0.01:.1f}s)")
+                if retry_attempt % 500 == 499:
+                    print(f"  等待使能... ({(retry_attempt + 1) * 0.01:.1f}s)... 检查其他终端是否占用 CAN 通道")
+            if not enable_ok:
+                print("使能超时，请确保:")
+                print("  1. 没有其他进程在控制机械臂（检查其他终端）")
+                print("  2. CAN 总线连接正常")
+                self.robot.disconnect()
+                self.robot = None
+                return False
 
             print("设置重力补偿（零力拖动）模式...")
             self.robot.set_leader_mode()
@@ -460,8 +469,10 @@ class HandEyeDataCollector:
             self.camera.cleanup()
         if self.robot is not None:
             try:
-                # 退出重力补偿模式
+                # 退出重力补偿模式（0x470#FC → 退出 leader 模式，进入待机）
+                print("  退出 Leader 模式...")
                 self.robot.set_follower_mode()
+                time.sleep(0.2)
                 self.robot.disable()
                 self.robot.disconnect()
             except Exception:

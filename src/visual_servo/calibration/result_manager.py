@@ -70,28 +70,29 @@ class CalibrationResultManager:
         os.makedirs(save_dir, exist_ok=True)
         filepath = os.path.join(save_dir, filename)
 
+        p = result.gripper_T_cam_pose6
         data = {
             "calibration_result": {
-                "algorithm": result.algorithm,
-                "num_samples": result.num_samples,
-                "rot_error_deg_mean": result.rot_error_deg_mean,
-                "rot_error_deg_std": result.rot_error_deg_std,
-                "trans_error_m_mean": result.trans_error_m_mean,
-                "trans_error_m_std": result.trans_error_m_std,
-                "position_std_mm": result.position_std_mm,
+                "algorithm": str(result.algorithm),
+                "num_samples": int(result.num_samples),
+                "rot_error_deg_mean": float(result.rot_error_deg_mean),
+                "rot_error_deg_std": float(result.rot_error_deg_std),
+                "trans_error_m_mean": float(result.trans_error_m_mean),
+                "trans_error_m_std": float(result.trans_error_m_std),
+                "position_std_mm": float(result.position_std_mm),
             },
             "gripper_T_cam": {
                 "matrix": result.gripper_T_cam.tolist(),
                 "pose6": {
-                    "x_m": result.gripper_T_cam_pose6[0],
-                    "y_m": result.gripper_T_cam_pose6[1],
-                    "z_m": result.gripper_T_cam_pose6[2],
-                    "roll_rad": result.gripper_T_cam_pose6[3],
-                    "pitch_rad": result.gripper_T_cam_pose6[4],
-                    "yaw_rad": result.gripper_T_cam_pose6[5],
-                    "roll_deg": float(np.degrees(result.gripper_T_cam_pose6[3])),
-                    "pitch_deg": float(np.degrees(result.gripper_T_cam_pose6[4])),
-                    "yaw_deg": float(np.degrees(result.gripper_T_cam_pose6[5])),
+                    "x_m": float(p[0]),
+                    "y_m": float(p[1]),
+                    "z_m": float(p[2]),
+                    "roll_rad": float(p[3]),
+                    "pitch_rad": float(p[4]),
+                    "yaw_rad": float(p[5]),
+                    "roll_deg": float(np.degrees(p[3])),
+                    "pitch_deg": float(np.degrees(p[4])),
+                    "yaw_deg": float(np.degrees(p[5])),
                 },
             },
         }
@@ -112,8 +113,20 @@ class CalibrationResultManager:
         return filepath
 
     @staticmethod
+    def _register_numpy_yaml():
+        """为 yaml 注册 numpy scalar 构造函数（兼容旧版标定文件）"""
+        def numpy_scalar_constructor(loader, node):
+            return float(loader.construct_scalar(node))
+        yaml.add_constructor(
+            'tag:yaml.org,2002:python/object/apply:numpy.core.multiarray.scalar',
+            numpy_scalar_constructor,
+        )
+
+    @staticmethod
     def load(filepath: str) -> Optional[CalibrationResult]:
         """加载标定结果"""
+        CalibrationResultManager._register_numpy_yaml()
+
         if not os.path.exists(filepath):
             print(f"文件不存在: {filepath}")
             return None
@@ -128,13 +141,13 @@ class CalibrationResultManager:
 
         return CalibrationResult(
             gripper_T_cam=gripper_T_cam,
-            rot_error_deg_mean=result_data["rot_error_deg_mean"],
-            rot_error_deg_std=result_data["rot_error_deg_std"],
-            trans_error_m_mean=result_data["trans_error_m_mean"],
-            trans_error_m_std=result_data["trans_error_m_std"],
-            position_std_mm=result_data["position_std_mm"],
-            num_samples=result_data["num_samples"],
-            algorithm=result_data.get("algorithm", "tsai_lenz"),
+            rot_error_deg_mean=float(result_data["rot_error_deg_mean"]),
+            rot_error_deg_std=float(result_data["rot_error_deg_std"]),
+            trans_error_m_mean=float(result_data["trans_error_m_mean"]),
+            trans_error_m_std=float(result_data["trans_error_m_std"]),
+            position_std_mm=float(result_data["position_std_mm"]),
+            num_samples=int(result_data["num_samples"]),
+            algorithm=str(result_data.get("algorithm", "tsai_lenz")),
         )
 
     @staticmethod

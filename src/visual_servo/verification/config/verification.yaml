@@ -1,0 +1,140 @@
+# ============================================================
+# 视觉伺服验证 — 试管架抓取与移载
+# ============================================================
+
+# 手眼标定结果路径（留空自动查找最近标定）
+calibration_result_path: ''
+
+# ============================================================
+# 相机参数
+# ============================================================
+camera:
+  type: orbbec                 # orbbec | realsense
+  resolution:
+    width: 640
+    height: 480
+  fps: 15
+  depth_scale: 0.001
+  align_depth: true
+  log_level: ERROR
+
+# ============================================================
+# 机械臂参数
+# ============================================================
+robot:
+  arm_model: piper
+  can_channel: can_piper_r
+  firmware_version: default
+  joint_nums: 6
+  speed: 0.2
+
+# ============================================================
+# 试管架几何先验（请根据实际试管架修改）
+# ============================================================
+rack:
+  rows: 2                      # 行数
+  cols: 5                      # 列数
+  hole_spacing_x: 0.007        # 孔横向间距 (m)
+  hole_spacing_y: 0.007        # 孔纵向间距 (m)
+  hole_diameter: 0.03         # 孔径 (m)
+  rack_height: 0.05            # 架面高度 (m)
+  tube_length: 0.10            # 试管长度 (m)
+
+  # 检测参数
+  plane_distance_threshold: 0.005    # 平面拟合距离阈值 (m)
+  ransac_iterations: 200             # RANSAC 迭代次数
+  downsample_step: 4                 # 深度图下采样步长
+  depth_tube_threshold: 0.015        # 空孔深度差阈值 (m)
+
+# ============================================================
+# YOLO 检测器参数
+# ============================================================
+yolo:
+  # 模型路径（训练完成后设置，留空则使用降级检测器）
+  model_path: "src/visual_servo/dataset/rack_holes/model.pt"
+  conf_threshold: 0.5           # 置信度阈值
+  iou_threshold: 0.45           # NMS IoU 阈值
+  # 孔位 Z 偏移（相对于深度值，负数=向下，用于将孔口深度转为抓取高度）
+  hole_z_offset: -0.025
+
+# ============================================================
+# 抓取位姿固定参数（试管在试管架中竖直向上）
+# ============================================================
+grasp_orientation:
+  roll: 180.0                  # 末端绕 X 轴旋转 (deg)
+  pitch: 0.0                   # 末端绕 Y 轴旋转 (deg)
+  yaw: 0.0                     # 末端绕 Z 轴旋转 (deg)
+
+# ============================================================
+# 技能定义（原子动作模板）
+# ============================================================
+skills:
+  # 预抓取：从安全高度下降接近试管
+  pre_grasp:
+    type: relative_move
+    direction: [0, 0, -0.12]     # 沿工具 Z 下降 12cm
+    speed: 0.1
+    frame: tool
+
+  # 抓取：闭合夹爪
+  grasp:
+    type: gripper
+    action: close
+    width: 0.015                 # 试管直径 ~15mm
+    force: 1.5                   # 夹持力 1.5N
+
+  # 抬升：沿基座 Z 轴垂直抬起
+  lift:
+    type: relative_move
+    direction: [0, 0, 0.18]      # 抬起 18cm
+    speed: 0.08
+    frame: base
+
+  # 转移到目标孔上方
+  transfer:
+    type: move_to_hole
+    hole_ref: target_hole        # 引用目标孔
+    offset_z: 0.15               # 在目标孔上方 15cm
+    speed: 0.3
+
+  # 放置：沿工具 Z 下降放入孔中
+  place:
+    type: relative_move
+    direction: [0, 0, -0.12]     # 下降 12cm
+    speed: 0.06
+    frame: tool
+
+  # 释放：张开夹爪
+  release:
+    type: gripper
+    action: open
+    width: 0.04                  # 完全张开
+    force: 1.0
+
+  # 撤回：抬升离开
+  retract:
+    type: relative_move
+    direction: [0, 0, 0.15]      # 抬升 15cm
+    speed: 0.1
+    frame: base
+
+  # 移动到源孔上方（用于初始定位）
+  move_to_source:
+    type: move_to_hole
+    hole_ref: source_hole
+    offset_z: 0.15
+    speed: 0.3
+
+# ============================================================
+# 流水线编排（执行顺序）
+# ============================================================
+pipeline:
+  - skill: move_to_source        # 移动到源孔上方
+  - skill: pre_grasp             # 下降接近试管
+  - skill: grasp                 # 闭合夹爪
+    verify: true
+  - skill: lift                  # 抬起试管
+  - skill: transfer              # 转移到目标孔
+  - skill: place                 # 放入目标孔
+  - skill: release               # 释放试管
+  - skill: retract               # 撤回
