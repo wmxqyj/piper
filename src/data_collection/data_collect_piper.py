@@ -6,10 +6,18 @@ Piper 双臂主从数据采集主脚本
 
 import os
 import sys
+import subprocess
 import yaml
 import time
 import shutil
 from pathlib import Path
+
+# 屏蔽 pyorbbecsdk C++ 底层 warning 刷屏
+try:
+    from pyorbbecsdk import Context, OBLogLevel
+    Context.set_logger_to_console(OBLogLevel.ERROR)
+except ImportError:
+    pass
 
 from piper_interface import PiperInterface, PiperArmState
 from camera_interface import RealSenseInterface, OrbbecInterface, CameraData, create_camera_interface
@@ -41,6 +49,11 @@ class PiperDataCollector:
         # 录制状态
         self.is_recording = False
         self.recording_thread = None
+
+        # 录制频率控制
+        rec_cfg = self.config.get('recording', {})
+        self._recording_interval = 1.0 / rec_cfg.get('frequency', 10)
+        self._last_recording_time = 0.0
 
         # 数据缓冲
         self.recorded_frames = []
@@ -109,6 +122,16 @@ class PiperDataCollector:
             self.piper_interface.cleanup()
         if self.camera_interface is not None:
             self.camera_interface.cleanup()
+        # 释放左臂（主臂）CAN 总线
+        try:
+            subprocess.run(
+                ['cansend', 'can_piper_l', '470#FC0000000000000000'],
+                timeout=2.0,
+                capture_output=True,
+            )
+            print("左臂 CAN 已释放")
+        except Exception as e:
+            print(f"左臂 CAN 释放失败（可忽略）: {e}")
         print("资源清理完成")
 
     def start_recording(self):
@@ -122,6 +145,7 @@ class PiperDataCollector:
         print("=" * 60)
 
         self.is_recording = True
+        self._last_recording_time = 0.0
         self.recorded_frames.clear()
         self.sync_manager.clear_buffer()
 
@@ -150,6 +174,11 @@ class PiperDataCollector:
         if not self.is_recording:
             return
 
+        # 按 recording.frequency 降采样
+        now = time.time()
+        if now - self._last_recording_time < self._recording_interval:
+            return
+
         try:
             # 获取相机数据
             camera_data = self.camera_interface.get_camera_data()
@@ -166,6 +195,7 @@ class PiperDataCollector:
                 return
 
             # 添加到缓冲区
+            self._last_recording_time = now
             self.sync_manager.add_frame_to_buffer(synced_frame)
             self.recorded_frames.append(synced_frame)
 
@@ -312,6 +342,7 @@ class PiperDataCollector:
                 if cmd == 's':
                     # 开始录制
                     self.is_recording = True
+                    self._last_recording_time = 0.0
                     self.recorded_frames.clear()
                     self.sync_manager.clear_buffer()
                     print(f"录制已开始，拖动主臂进行示教...")

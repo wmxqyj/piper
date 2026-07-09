@@ -1,15 +1,48 @@
-[检测] 结果已锁定  源孔: R0C0
-        目标孔: R0C0
-        按 'v/x' 验证位置，按 's' 执行流水线，按 'd' 重新检测
+[07/09 14:24:41.783158][warning][1011792][ObException.cpp:5] Current device does not support frame sync!
+[07/09 14:24:41.783256][warning][1011792][Pipeline.cpp:45] Execute failure! A libobsensor_exception has occurred!
+	 - where:45#Pipeline
+	 - msg:Current device does not support frame sync!
+	 - type:N11libobsensor31unsupported_operation_exceptionE
+[07/09 14:24:41.783263][info][1011792][Pipeline.cpp:47] Pipeline created with device: {name: DaBai DC1, sn: CC1NC450027}, @0x5FC6FE65CC40
+[07/09 14:24:41.788933][info][1011792][OpenNIDevice.cpp:632] Color sensor has been created!
+[07/09 14:24:41.789161][info][1011792][OpenNIDevice.cpp:384] Depth sensor has been created!
+color profile : 640x480@30_OBFormat.MJPG
+depth profile : 640x400@30_OBFormat.Y11
+set_align_mode(HW) 配置成功
+[07/09 14:24:41.789384][warning][1011792][ObException.cpp:5] Current device does not support frame sync!
+enable_frame_sync 失败: Current device does not support frame sync!
+[07/09 14:24:41.789479][info][1011792][Pipeline.cpp:188] Check and set config start!
+[07/09 14:24:41.789588][info][1011792][Pipeline.cpp:223] Check and set config done!
+[07/09 14:24:41.801996][info][1011792][Pipeline.cpp:288] Try to start streams!
+[07/09 14:24:41.802033][info][1011792][VideoSensor.cpp:646] start OB_SENSOR_COLOR stream with profile: {type: OB_STREAM_COLOR, format: OB_FORMAT_MJPG, width: 640, height: 480, fps: 30}, Backend Format: OB_FORMAT_MJPG
+[07/09 14:24:42.032677][info][1011792][Pipeline.cpp:301] Start streams done!
+[07/09 14:24:42.032688][info][1011792][Pipeline.cpp:277] Pipeline start done!
+已创建 AlignFilter 用于后处理对齐
 
-[验证] 移动至target孔 R0C0  @ (-0.072, -0.027, 0.215)
-  [诊断] 当前位姿: (0.063, -0.001, 0.169)
-  [诊断] 孔位 3D (cam): (-0.072, -0.027, 0.215)
-  [诊断] 目标位姿 (base): x=0.309, y=0.070, z=0.254, r=180.0°, p=0.0°, y=0.0°
-  Move to: (0.309, 0.070, 0.254, 180.0°, 0.0°, 0.0°)
-  [诊断] 当前位姿: (0.063, -0.001, 0.169)
-  [诊断] 直线距离: 269.7 mm
-  set_speed=10%, set_motion_mode=P, 发出 move_p...
-  指令已发送，等待到位...
-  运动中... (0s)  motion_status=REACH_TARGET_POS_SUCCESSFULLY(0x0)
-  到位, 位置误差: 269.7 mm
+===== 相机参数 (Debug) =====
+RGB 内参: fx=487.4711, fy=487.4711, cx=317.3837, cy=213.6325, 640x480
+Depth 内参: fx=487.4711, fy=487.4711, cx=317.3837, cy=213.6325, 640x480
+D2C 外参 (depth->color):
+  Rotation:
+[[1. 0. 0.]
+ [0. 1. 0.]
+ [0. 0. 1.]]
+[Debug] 无法获取相机参数: 'pyorbbecsdk.OBD2CTransform' object has no attribute 'trans'
+[07/09 14:24:42.133157][warning][1011792][Pipeline.cpp:377] Wait for frame timeout, you can try to increase the wait time! current timeout=100
+[07/09 14:24:42.143844][warning][1011792][Align.cpp:205] pFrame is nullptr!
+[07/09 14:24:42.178157][warning][1011792][Align.cpp:205] pFrame is nullptr!
+[07/09 14:24:42.210754][warning][1011792][Align.cpp:205] pFrame is nullptr!
+[07/09 14:24:42.244972][warning][1011792][Align.cpp:205] pFrame is nullptr!
+[Debug] 帧 #0: color=640x480, depth=640x480, depth_scale=1.000000, align_mode=HW
+  >> 中心像素 (320,240): depth=646.0mm, color=BGR([128 132  83])
+[Debug] 帧 #30: color=640x480, depth=640x480, depth_scale=1.000000, align_mode=HW
+  >> 中心像素 (320,240): depth=646.0mm, color=BGR([129 133  84])
+[Debug] 帧 #60: color=640x480, depth=640x480, depth_scale=1.000000, align_mode=HW
+  >> 中心像素 (320,240): depth=646.0mm, color=BGR([128 131  85])
+[Debug] 帧 #90: color=640x480, depth=640x480, depth_scale=1.000000, align_mode=HW
+  >> 中心像素 (320,240): depth=646.0mm, color=BGR([128 130  84])
+[Debug] 帧 #120: color=640x480, depth=640x480, depth_scale=1.000000, align_mode=HW
+  >> 中心像素 (320,240): depth=646.0mm, color=BGR([130 133  87])
+[Debug] 帧 #150: color=640x480, depth=640x480, depth_scale=1.000000, align_mode=HW
+  >> 中心像素 (320,240): depth=643.0mm, color=BGR([126 135  84])
+[Debug] 帧 #180: color=640x480, depth=640x480, depth_scale=1.000000, align_mode=HW

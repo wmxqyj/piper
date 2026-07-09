@@ -34,8 +34,8 @@ recording:
 # 任务配置列表（包含任务名称和语言指令）
 # 录制时直接从列表中选择任务，不需要手动输入语言指令
 tasks:
-  - name: "pick_place"
-    descriptions: ["pick up the red block and place it in the box"]
+  - name: "pick_up"
+    descriptions: ["pick up the tube"]
     episode_start: 0
     
   - name: "push_button"

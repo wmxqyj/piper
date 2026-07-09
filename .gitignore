@@ -15,3 +15,6 @@ examples/
 data/
 src/visual_servo/dataset/
 runs/
+src/data_collection/camera/
+src/visual_servo/debug.txt
+

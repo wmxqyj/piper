@@ -6,10 +6,10 @@ bash can_activate.sh can_piper_r 1000000 "3-7:1.0"
 
 
 # 从臂从新进入can模式
-cansend can_piper_r 470#FC0000000000000000
+cansend can_piper_l 470#FC0000000000000000
 
 cansend can_piper_r 471#0702000000000000
 
 cansend can_piper_r 151#0100000000000000
 
-candump can_piper_r
+candump can_piper_l
