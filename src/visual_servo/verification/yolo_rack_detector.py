@@ -13,7 +13,17 @@ YOLO 试管架孔位检测器
 import os
 import cv2
 import numpy as np
+from pathlib import Path
 from typing import Optional, List, Tuple, Dict
+
+# 项目根目录
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+
+# YOLO 导入（可选，用于降级）
+try:
+    from ultralytics import YOLO
+except ImportError:
+    YOLO = None
 
 from visual_servo.verification.rack_detector import (
     RackDetector as FallbackDetector,
@@ -35,6 +45,7 @@ class YoloRackDetector:
         self.expected_holes = self.rows * self.cols
 
         # === YOLO 配置 ===
+        self.detector_mode = yolo_cfg.get("detector_mode", "auto")
         self.model_path = yolo_cfg.get("model_path", "")
         self.conf_threshold = float(yolo_cfg.get("conf_threshold", 0.5))
         self.iou_threshold = float(yolo_cfg.get("iou_threshold", 0.45))
@@ -53,20 +64,27 @@ class YoloRackDetector:
 
     def _load_model(self):
         """加载 YOLO 模型"""
-        if not self.model_path or not os.path.exists(self.model_path):
-            print(f"[YOLO] 模型不存在: {self.model_path}")
+        if not self.model_path:
+            print("[YOLO] 未配置模型路径")
+            print("[YOLO] 将使用降级检测器（深度平面方案）")
+            return
+
+        model_abs = str(_PROJECT_ROOT / self.model_path)
+        if not os.path.exists(model_abs):
+            print(f"[YOLO] 模型不存在: {model_abs}")
             print("[YOLO] 将使用降级检测器（深度平面方案）")
             return
 
         try:
-            from ultralytics import YOLO
-            self.model = YOLO(self.model_path)
-            print(f"[YOLO] 模型已加载: {self.model_path}")
+            self.model = YOLO(model_abs)
+            print(f"[YOLO] 模型已加载: {model_abs}")
+            print("[YOLO] 加载完毕")
         except ImportError:
             print("[YOLO] ultralytics 未安装: pip install ultralytics")
             print("[YOLO] 将使用降级检测器")
         except Exception as e:
             print(f"[YOLO] 模型加载失败: {e}")
+            print("[YOLO] 将使用降级检测器")
 
     @property
     def is_ready(self) -> bool:
@@ -92,6 +110,19 @@ class YoloRackDetector:
         if not self.is_ready:
             return self._fallback.detect(rgb_image, depth_image, camera_matrix)
 
+        # 深度图: uint16 mm → float32 m（Orbbec SDK 输出 mm）
+        depth_image = depth_image.astype(np.float32) / 1000.0
+
+        # 根据检测模式选择路径
+        if self.detector_mode == "depth":
+            return self._fallback.detect(rgb_image, depth_image, camera_matrix)
+
+        # YOLO 路径（mode=yolo 或 auto）
+        if not self.is_ready:
+            if self.detector_mode == "yolo":
+                return RackDetectionResult(success=False)
+            return self._fallback.detect(rgb_image, depth_image, camera_matrix)
+
         # Step 1: YOLO 推理
         results = self.model(
             rgb_image, conf=self.conf_threshold, iou=self.iou_threshold,
@@ -99,7 +130,8 @@ class YoloRackDetector:
         )
 
         if not results or len(results[0].boxes) == 0:
-            print("[YOLO] 未检测到孔位，降级到深度方案")
+            if self.detector_mode == "yolo":
+                return RackDetectionResult(success=False)
             return self._fallback.detect(rgb_image, depth_image, camera_matrix)
 
         boxes = results[0].boxes
@@ -161,16 +193,16 @@ class YoloRackDetector:
             elif not has_tube and target_hole is None:
                 target_hole = hole
 
-        # 如果没找到源孔或目标孔，用降级方案的检测结果补全
+        # 如果没找到源孔或目标孔：yolo 模式直接返回失败，auto 模式降级补全
         if source_hole is None or target_hole is None:
+            if self.detector_mode == "yolo":
+                return RackDetectionResult(success=False)
             fallback_result = self._fallback.detect(
                 rgb_image, depth_image, camera_matrix)
             if source_hole is None and fallback_result.source_hole is not None:
                 source_hole = fallback_result.source_hole
-                print("[YOLO] 源孔由降级检测器补充")
             if target_hole is None and fallback_result.target_hole is not None:
                 target_hole = fallback_result.target_hole
-                print("[YOLO] 目标孔由降级检测器补充")
 
         # 估算架面参数（取所有有效深度的平均值）
         valid_depths = [h.depth_value for h in holes_dict.values()
@@ -302,13 +334,13 @@ class YoloRackDetector:
         display = rgb_image.copy()
 
         if not result.success:
-            cv2.putText(display, "YOLO: No holes detected", (10, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-            return display
-
-        src_text = f"YOLO: holes={len(result.holes)}"
-        cv2.putText(display, src_text, (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            if result.holes and len(result.holes) > 0:
+                # 有孔位但无 tube：同样画出来
+                pass
+            else:
+                cv2.putText(display, "YOLO: No holes detected", (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                return display
 
         if result.holes:
             for hole in result.holes.values():
@@ -335,5 +367,18 @@ class YoloRackDetector:
             cv2.circle(display, pt, 10, (255, 100, 0), 2)
             cv2.putText(display, "TARGET", (pt[0] - 24, pt[1] - 14),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 100, 0), 2)
+
+        # 状态提示
+        if result.success:
+            status = "YOLO: OK"
+            color = (0, 200, 0)
+        elif result.holes:
+            status = f"YOLO: {len(result.holes)} holes (no tube)"
+            color = (0, 150, 255)
+        else:
+            status = "YOLO: No holes detected"
+            color = (0, 0, 255)
+        cv2.putText(display, status, (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
 
         return display

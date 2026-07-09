@@ -50,6 +50,8 @@ rack:
 # YOLO 检测器参数
 # ============================================================
 yolo:
+  # 检测模式: "yolo"=仅 YOLO, "depth"=仅深度方案, "auto"=YOLO优先降级
+  detector_mode: "auto"
   # 模型路径（训练完成后设置，留空则使用降级检测器）
   model_path: "src/visual_servo/dataset/rack_holes/model.pt"
   conf_threshold: 0.5           # 置信度阈值

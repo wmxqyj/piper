@@ -206,25 +206,74 @@ class SkillExecutor:
             np.radians(self.grasp_yaw),
         ])
 
+        # 诊断输出
+        print(f"  [诊断] 当前位姿: ({current[0]:.3f}, {current[1]:.3f}, {current[2]:.3f})")
+        print(f"  [诊断] 孔位 3D (cam): ({hole.position_3d[0]:.3f}, {hole.position_3d[1]:.3f}, {hole.position_3d[2]:.3f})")
+        print(f"  [诊断] 目标位姿 (base): x={target_pose[0]:.3f}, y={target_pose[1]:.3f}, "
+              f"z={target_pose[2]:.3f}, r={np.degrees(target_pose[3]):.1f}°, "
+              f"p={np.degrees(target_pose[4]):.1f}°, y={np.degrees(target_pose[5]):.1f}°")
+
         return self._do_move_p(target_pose, float(cfg.get("speed", self.default_speed)))
 
     def _do_move_p(self, target_pose: np.ndarray, speed: float) -> bool:
-        """执行 move_p 指令"""
+        """执行 move_p 指令（轮询 motion_status 等待到位）"""
         try:
             target_list = target_pose.tolist()
             print(f"  Move to: ({target_pose[0]:.3f}, {target_pose[1]:.3f}, "
-                  f"{target_pose[2]:.3f})")
+                  f"{target_pose[2]:.3f}, {np.degrees(target_pose[3]):.1f}°, "
+                  f"{np.degrees(target_pose[4]):.1f}°, {np.degrees(target_pose[5]):.1f}°)")
 
+            # 打印当前位姿对比
+            current = self._get_current_pose()
+            if current is not None:
+                dist = np.linalg.norm(current[:3] - target_pose[:3])
+                print(f"  [诊断] 当前位姿: ({current[0]:.3f}, {current[1]:.3f}, {current[2]:.3f})")
+                print(f"  [诊断] 直线距离: {dist*1000:.1f} mm")
+
+            # 设置速度（配置中是 0~1 比值，转成 0~100 百分比）
+            self.robot.set_speed_percent(int(speed * 100))
+            # 显式设置 P 模式（实测 move_p 内部自动切换有时不生效）
+            self.robot.set_motion_mode(self.robot.OPTIONS.MOTION_MODE.P)
+
+            print(f"  set_speed={int(speed*100)}%, set_motion_mode=P, 发出 move_p...")
             self.robot.move_p(target_list)
-            print("  指令已发送，等待到达...")
-            time.sleep(2.5)
+            print("  指令已发送，等待到位...")
+            time.sleep(0.5)  # 等待指令下发
 
+            # 轮询 motion_status：0=静止/到位
+            timeout = 10.0
+            poll_interval = 0.1
+            elapsed = 0.0
+            last_print_st = -1  # 避免重复打印相同状态
+            while elapsed < timeout:
+                time.sleep(poll_interval)
+                elapsed += poll_interval
+                status = self.robot.get_arm_status()
+                if status is not None and status.msg is not None:
+                    motion_st = getattr(status.msg, "motion_status", None)
+                    # 每 0.5s 或状态变化时打印一次 motion_status
+                    if motion_st != last_print_st or int(elapsed * 10) % 5 == 0:
+                        print(f"  运动中... ({elapsed:.0f}s)  motion_status={motion_st}")
+                        last_print_st = motion_st
+                    if motion_st == 0:
+                        # 到位，再确认一下位置精度
+                        arrived = self._get_current_pose()
+                        if arrived is not None:
+                            err = np.linalg.norm(arrived[:3] - target_pose[:3])
+                        else:
+                            err = 0.0
+                        print(f"  到位, 位置误差: {err*1000:.1f} mm")
+                        return True
+
+            # 超时：打印诊断信息
             arrived = self._get_current_pose()
             if arrived is not None:
                 err = np.linalg.norm(arrived[:3] - target_pose[:3])
-                print(f"  到位, 位置误差: {err*1000:.1f} mm")
-                return err < 0.05
-            return True
+                print(f"  超时 ({timeout:.0f}s), 当前位姿: ({arrived[0]:.3f}, {arrived[1]:.3f}, {arrived[2]:.3f})")
+                print(f"  与目标距离: {err*1000:.1f} mm")
+            else:
+                print(f"  超时 ({timeout:.0f}s), 且无法获取当前位姿")
+            return False
         except Exception as e:
             print(f"  [FAIL] 移动失败: {e}")
             return False

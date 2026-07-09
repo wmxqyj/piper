@@ -250,17 +250,17 @@ class TubeTransferVerification:
             key = cv2.waitKey(30) & 0xFF
 
             if key == ord("d"):
-                # 重新锁定（用当前帧的检测结果覆盖快照）
-                if live_result.success:
+                # 锁定：优先用成功结果，否则有孔位也可锁定
+                if live_result.success or (live_result.holes and len(live_result.holes) > 0):
                     snapshot = live_result
                     src = snapshot.source_hole
                     tgt = snapshot.target_hole
                     print(f"\n[检测] 结果已锁定"
                           f"  源孔: R{src.index[0]}C{src.index[1]}" if src else "")
                     print(f"        目标孔: R{tgt.index[0]}C{tgt.index[1]}" if tgt else "")
-                    print(f"        按 's' 执行流水线，按 'd' 重新检测")
+                    print(f"        按 'v/x' 验证位置，按 's' 执行流水线，按 'd' 重新检测")
                 else:
-                    print("\n[检测] 当前帧无法检测到试管架，锁定失败")
+                    print("\n[检测] 当前帧未检测到任何孔位，锁定失败")
 
             elif key == ord("s"):
                 if snapshot is None:
@@ -311,7 +311,7 @@ class TubeTransferVerification:
 
         # 复用 executor 内部变换逻辑
         cfg = {hole_type + "_hole": hole, "offset_z": offset_z,
-               "speed": 0.3, "hole_ref": hole_type + "_hole"}
+               "speed": 0.1, "hole_ref": hole_type + "_hole"}
         self.executor._move_to_hole(cfg)
 
     # ──────────────────────────────────────────────
