@@ -28,13 +28,13 @@ class HoleInfo:
 @dataclass
 class RackDetectionResult:
     """试管架检测结果"""
-    success: bool = False
-    rack_plane_center: Optional[np.ndarray] = None   # 架面中心 (3,)
-    rack_normal: Optional[np.ndarray] = None         # 架面法向量 (3,)
-    rack_orientation: Optional[np.ndarray] = None    # 架面局部坐标系旋转矩阵 (3,3)
-    holes: Optional[Dict[Tuple[int, int], HoleInfo]] = None  # (row,col) -> HoleInfo
-    source_hole: Optional[HoleInfo] = None           # 源孔（有试管）
-    target_hole: Optional[HoleInfo] = None           # 目标孔（空孔）
+    success: bool
+    rack_plane_center: Optional[np.ndarray]   # 架面中心 (3,)
+    rack_normal: Optional[np.ndarray]         # 架面法向量 (3,)
+    rack_orientation: Optional[np.ndarray]    # 架面局部坐标系旋转矩阵 (3,3)
+    holes: Optional[Dict[Tuple[int, int], HoleInfo]]  # (row,col) -> HoleInfo
+    source_hole: Optional[HoleInfo]           # 源孔（有试管）
+    target_hole: Optional[HoleInfo]           # 目标孔（空孔）
 
 
 class RackDetector:

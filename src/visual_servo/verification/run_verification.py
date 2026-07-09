@@ -311,7 +311,7 @@ class TubeTransferVerification:
 
         # 复用 executor 内部变换逻辑
         cfg = {hole_type + "_hole": hole, "offset_z": offset_z,
-               "speed": 0.1, "hole_ref": hole_type + "_hole"}
+               "speed": 0.3, "hole_ref": hole_type + "_hole"}
         self.executor._move_to_hole(cfg)
 
     # ──────────────────────────────────────────────
