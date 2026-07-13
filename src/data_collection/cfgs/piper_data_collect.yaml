@@ -9,6 +9,10 @@ piper:
   control_frequency: 50  # 控制频率 Hz
   joint_nums: 6  # 关节数量
 
+# 手眼标定配置
+calibration:
+  result_path: "../../visual_servo/calibration_data/calib_data_20260707_181218/calibration_result.yaml"
+
 # 末端执行器配置
 effector:
   type: "agx_gripper"  # 夹爪类型
@@ -35,7 +39,7 @@ recording:
 # 录制时直接从列表中选择任务，不需要手动输入语言指令
 tasks:
   - name: "pick_up"
-    descriptions: ["pick up the tube"]
+    descriptions: ["pick up the tube"]   
     episode_start: 0
     
   - name: "push_button"

@@ -10,6 +10,7 @@ import subprocess
 import yaml
 import time
 import shutil
+import numpy as np
 from pathlib import Path
 
 # 屏蔽 pyorbbecsdk C++ 底层 warning 刷屏
@@ -68,6 +69,31 @@ class PiperDataCollector:
             config = yaml.safe_load(f)
         return config
 
+    def _load_gripper_T_cam(self) -> np.ndarray:
+        """
+        从手眼标定 YAML 文件加载 gripper_T_cam 矩阵
+
+        Returns
+        -------
+        np.ndarray
+            4x4 手眼标定矩阵
+        """
+        calib_cfg = self.config.get('calibration', {})
+        result_path = calib_cfg.get('result_path', '')
+        if not result_path:
+            print("[WARN] 未配置 calibration.result_path，外参将使用相机接口默认值")
+            return None
+        if not os.path.isabs(result_path):
+            result_path = os.path.join(os.path.dirname(__file__), result_path)
+        if not os.path.exists(result_path):
+            print(f"[WARN] 标定文件不存在: {result_path}，外参将使用相机接口默认值")
+            return None
+        with open(result_path, 'r') as f:
+            data = yaml.safe_load(f)
+        matrix = np.array(data['gripper_T_cam']['matrix'])
+        print(f"已加载手眼标定矩阵: {result_path}")
+        return matrix
+
     def initialize(self) -> bool:
         """
         初始化所有组件
@@ -96,9 +122,10 @@ class PiperDataCollector:
 
             # 3. 初始化数据同步管理器
             print("\n[3/4] 初始化数据同步管理器...")
+            gripper_T_cam = self._load_gripper_T_cam()
             self.sync_manager = DataSyncManager({
                 'max_time_diff': 0.05  # 50ms
-            })
+            }, gripper_T_cam=gripper_T_cam)
 
             # 4. 初始化 RLBench 适配器
             print("\n[4/4] 初始化 RLBench 格式适配器...")

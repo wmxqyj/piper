@@ -13,6 +13,44 @@ from piper_interface import PiperArmState
 from camera_interface import CameraData
 
 
+def pose6_to_matrix(pose6: np.ndarray) -> np.ndarray:
+    """
+    将 [x, y, z, roll, pitch, yaw] 转换为 4x4 齐次变换矩阵
+
+    Parameters
+    ----------
+    pose6 : np.ndarray
+        [x, y, z, roll, pitch, yaw]，角度单位 rad
+
+    Returns
+    -------
+    np.ndarray
+        4x4 齐次变换矩阵
+    """
+    x, y, z = pose6[:3]
+    roll, pitch, yaw = pose6[3:]
+
+    cy, sy = np.cos(yaw * 0.5), np.sin(yaw * 0.5)
+    cp, sp = np.cos(pitch * 0.5), np.sin(pitch * 0.5)
+    cr, sr = np.cos(roll * 0.5), np.sin(roll * 0.5)
+
+    qw = cr * cp * cy + sr * sp * sy
+    qx = sr * cp * cy - cr * sp * sy
+    qy = cr * sp * cy + sr * cp * sy
+    qz = cr * cp * sy - sr * sp * cy
+
+    R = np.array([
+        [1 - 2*qy**2 - 2*qz**2, 2*qx*qy - 2*qz*qw, 2*qx*qz + 2*qy*qw],
+        [2*qx*qy + 2*qz*qw, 1 - 2*qx**2 - 2*qz**2, 2*qy*qz - 2*qx*qw],
+        [2*qx*qz - 2*qy*qw, 2*qy*qz + 2*qx*qw, 1 - 2*qx**2 - 2*qy**2],
+    ])
+
+    matrix = np.eye(4)
+    matrix[:3, :3] = R
+    matrix[:3, 3] = [x, y, z]
+    return matrix
+
+
 @dataclass
 class SyncedFrame:
     """同步后的数据帧"""
@@ -41,7 +79,7 @@ class SyncedFrame:
 class DataSyncManager:
     """数据同步管理器"""
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], gripper_T_cam: Optional[np.ndarray] = None):
         """
         初始化数据同步管理器
 
@@ -49,10 +87,16 @@ class DataSyncManager:
         ----------
         config : Dict[str, Any]
             配置字典
+        gripper_T_cam : np.ndarray, optional
+            手眼标定矩阵 (4x4)，即末端法兰到相机的变换矩阵。
+            如果提供，则外参通过 base_T_gripper @ gripper_T_cam 实时计算；
+            如果不提供，则使用相机接口返回的外参（通常为 np.eye(4)）。
         """
         self.config = config
         self.frame_buffer = []
         self.frame_counter = 0
+
+        self.gripper_T_cam = gripper_T_cam
 
         # 相机参数（第一帧时设置）
         self.camera_intrinsics_set = False
@@ -99,15 +143,21 @@ class DataSyncManager:
             frame_id = self.frame_counter
             self.frame_counter += 1
 
-        # 第一帧时保存相机参数
+        # 相机内参（仅第一帧保存）
         intrinsics = None
-        extrinsics = None
         if not self.camera_intrinsics_set:
             self.saved_intrinsics = camera_data.camera_intrinsics
-            self.saved_extrinsics = camera_data.camera_extrinsics
             self.camera_intrinsics_set = True
             intrinsics = camera_data.camera_intrinsics
-            extrinsics = camera_data.camera_extrinsics
+
+        # 相机外参
+        if self.gripper_T_cam is not None:
+            extrinsics = pose6_to_matrix(arm_state.gripper_pose) @ self.gripper_T_cam
+        else:
+            extrinsics = None
+            if self.saved_extrinsics is None:
+                self.saved_extrinsics = camera_data.camera_extrinsics
+                extrinsics = camera_data.camera_extrinsics
 
         # 创建同步帧
         synced_frame = SyncedFrame(

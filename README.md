@@ -10,6 +10,8 @@
 - **数据采集**：同步采集机械臂状态和相机数据
 - **格式适配**：保存为 RLBench 格式（适配6关节机械臂）
 - **数据清洗**：支持帧删除和关键帧标记
+- **相机支持**：兼容 RealSense 和 Orbbec（DaBai DC1）相机
+- **独立录制帧率**：录制频率与控制/相机帧率解耦，独立配置
 
 ## 文件结构
 
@@ -19,11 +21,15 @@ src/data_collection/
 ├── cfgs/
 │   └── piper_data_collect.yaml    # 配置文件
 ├── piper_interface.py              # Piper SDK 接口封装
-├── camera_interface.py             # PyRealSense 相机接口
+├── camera_interface.py             # 相机接口（RealSense / Orbbec）
 ├── data_sync.py                    # 数据同步机制
 ├── rlbench_adapter.py              # RLBench 格式适配器
 ├── data_collect_piper.py           # 主录制脚本
-└── data_cleaner.py                 # 数据清洗工具
+├── data_cleaner.py                 # 数据清洗工具
+└── camera/
+    ├── depth_viewer.py             # Orbbec 深度查看器
+    ├── depth_viewer_callback.py    # Orbbec 回调模式深度查看器
+    └── depth_color_sync_align_viewer.py  # Orbbec D2C 对齐+帧同步查看器
 ```
 
 ## 系统架构
@@ -37,10 +43,11 @@ src/data_collection/
                │ Piper SDK
                ▼
 ┌─────────────────────────────────────────────────┐
-│          主从控制循环                             │
+│          主从控制循环 (50Hz)                      │
 │          - 读取主臂关节角度                       │
 │          - 发送命令给从臂                         │
 │          - 同步夹爪状态                           │
+│          - 回调触发录制                           │
 └──────────────┬──────────────────────────────────┘
                │
                ▼
@@ -53,9 +60,16 @@ src/data_collection/
                ▼
 ┌─────────────────────────────────────────────────┐
 │          RGB-D 相机                              │
-│          (RealSense)                             │
+│          (RealSense / Orbbec DaBai DC1)          │
+│          30fps 独立工作                          │
 └──────────────┬──────────────────────────────────┘
                │ 图像数据采集
+               ▼
+┌─────────────────────────────────────────────────┐
+│          录制降采样 (→ 10Hz)                     │
+│          按 recording.frequency 抽取             │
+└──────────────┬──────────────────────────────────┘
+               │
                ▼
 ┌─────────────────────────────────────────────────┐
 │          数据同步                                 │
@@ -115,13 +129,19 @@ interface.cleanup()
 ### 3. 相机接口 (`camera_interface.py`)
 
 **主要功能**：
-- 连接 RealSense 相机
+- 连接 RealSense 或 Orbbec（DaBai DC1）相机
+- 通过 `create_camera_interface(config)` 工厂函数自动选择相机类型
 - 获取 RGB 和深度图像
 - 提取相机内参矩阵
-- 深度对齐到彩色图像
+- 深度对齐到彩色图像（RealSense 硬件对齐 / Orbbec 支持硬件 D2C 或软件 AlignFilter）
+- 深度图单位：mm（已统一归一化）
 
 **核心 API**：
 ```python
+# 创建相机接口（自动选择类型）
+camera = create_camera_interface(config)
+# 根据 config['type'] 自动选择 RealSenseInterface / OrbbecInterface
+
 # 连接
 camera.connect()
 
@@ -188,6 +208,7 @@ adapter.save_demo(demo, save_path, episode_idx)
 - 集成所有模块
 - 交互式录制控制
 - 数据保存
+- 录制频率与控制/相机帧率解耦（通过 `recording.frequency` 配置）
 
 **使用方法**：
 ```bash
@@ -196,22 +217,22 @@ python data_collect_piper.py
 
 **交互流程**：
 1. 初始化系统
-2. 输入任务名称、episode 编号
-3. 主从控制启动
+2. 选择任务（从配置文件列表选择）
+3. 主从控制启动（子线程运行）
 4. 输入命令：
    - `s` - 开始录制
-   - `q` - 停止录制
-   - `y` - 保存数据
-   - `n` - 丢弃数据
+   - `q` - 停止录制（询问是否保存）
    - `e` - 退出系统
+5. 退出时自动释放左臂（cansend）
 
 ### 7. 数据清洗工具 (`data_cleaner.py`)
 
 **主要功能**：
 - 删除前/后 N 帧
 - 交互式标记关键帧
-- 自动检测关键帧
+- 自动检测关键帧（基于关节角度变化和夹爪状态）
 - 清理多余图像文件
+- 自动扫描 `data/` 目录，菜单选择 episode
 
 **使用方法**：
 ```bash
@@ -219,10 +240,10 @@ python data_cleaner.py
 ```
 
 **清洗流程**：
-1. 输入 Episode 路径
+1. 自动扫描 `data/` 下所有可用 episode，数字菜单选择
 2. 选择操作：
    - `1` - 删除帧
-   - `2` - 交互式标记关键帧
+   - `2` - 交互式标记关键帧（`m 帧号` / `u 帧号` 标记/取消）
    - `3` - 自动检测关键帧
    - `4` - 保存清洗数据
    - `0` - 退出
@@ -262,7 +283,7 @@ Observation(
 ### 保存路径结构
 
 ```
-/home/siat/data/piper_demos/
+/data/
 └── task_name/
     └── all_variations/
         └── episodes/
@@ -350,8 +371,16 @@ Episode: 0
 cd src/data_collection
 python data_cleaner.py
 
-# 2. 输入 Episode 路径
-输入 Episode 路径: /home/siat/data/piper_demos/pick_place/all_variations/episodes/episode0
+# 2. 自动扫描可用 episode
+Piper 数据清洗工具
+============================================================
+数据目录 (默认 /home/siat/.../pyAgxArm/data):
+按回车直接使用默认目录
+
+找到 1 个 episode:
+  [0] pick_up / episode0  -> .../data/pick_up/all_variations/episodes/episode0
+
+选择 episode (0-0): 0
 
 # 3. 显示信息
 Episode 信息
@@ -376,6 +405,7 @@ Episode 信息
 选择操作: 2
 输入命令: m 60
 已标记帧 60 为关键帧
+当前所有关键帧: [20, 45, 60, 72, 100, 128]
 输入命令: u 72
 已取消帧 72 的关键帧标记
 输入命令: q
@@ -400,16 +430,23 @@ Episode 信息
 ```yaml
 # 机械臂配置
 piper:
-  leader_can: "can_piper_l"      # 修改为实际的 CAN 通道
-  follower_can: "can_piper_r"    # 修改为实际的 CAN 通道
+  leader_can: "can_piper_l"      # 主臂 CAN 通道
+  follower_can: "can_piper_r"    # 从臂 CAN 通道
   control_frequency: 50          # 控制频率（Hz）
 
-# 相机配置
+# 相机配置（Orbbec 示例）
 camera:
+  type: "orbbec"                 # 相机类型: "realsense" 或 "orbbec"
   resolution:
     width: 640                   # 图像宽度
     height: 480                  # 图像高度
-  fps: 30                        # 帧率
+  fps: 30                        # 相机帧率
+  align_depth: true              # 是否对齐深度到彩色
+  log_level: "WARNING"           # Orbbec SDK 日志级别
+
+# 录制配置
+recording:
+  frequency: 10                  # 录制频率（Hz），与控制/相机帧率解耦
 
 # 任务配置列表（重点：包含任务名称和语言指令）
 tasks:
@@ -445,12 +482,13 @@ demo:
 **硬件**：
 - 两个 Piper 机械臂（通过 CAN 总线连接）
 - AgxGripper 夹爪（可选）
-- RealSense RGB-D 相机
+- RealSense / Orbbec RGB-D 相机
 
 **软件**：
 - Python 3.8+
 - pyAgxArm SDK
-- pyrealsense2
+- pyrealsense2（RealSense 相机）
+- pyorbbecsdk（Orbbec 相机）
 - numpy
 - opencv-python
 - pyyaml
@@ -478,12 +516,17 @@ tasks:
 
 ### Q2: 相机连接失败怎么办？
 
-A: 检查相机是否正确连接，系统会继续运行但不会记录相机数据。也可以修改配置禁用相机：
+A: 检查相机是否正确连接，系统会继续运行但不会记录相机数据。也可以修改配置切换相机类型：
 
 ```yaml
 camera:
   type: "none"  # 禁用相机
 ```
+
+**Orbbec 相机常见问题**：
+- DaBai DC1 等旧款相机不支持硬件帧同步，`enable_frame_sync()` 会抛出异常，不影响使用
+- Orbbec 深度图原始单位因型号而异（DC1 为 mm，`depth_scale=1.0`），系统已统一处理
+- 可通过 `log_level: "ERROR"` 屏蔽 SDK 底层 warning 刷屏
 
 ### Q3: 主臂无法拖动？
 

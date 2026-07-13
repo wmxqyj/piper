@@ -9,7 +9,6 @@ import sys
 import pickle
 import shutil
 import numpy as np
-import cv2
 from typing import List, Optional, Tuple
 
 from rlbench_adapter import Demo, Observation
@@ -177,7 +176,7 @@ class DataCleaner:
                             self.keypoint_idxs.append(frame_id)
                             self.keypoint_idxs.sort()
                             print(f"已标记帧 {frame_id} 为关键帧")
-                            self._show_frame_info(frame_id)
+                            print(f"当前所有关键帧: {self.keypoint_idxs}")
                         else:
                             print(f"帧 {frame_id} 已经是关键帧")
                     else:
@@ -220,32 +219,9 @@ class DataCleaner:
         print(f"  末端四元数: {obs.gripper_pose[3:]}")
         print(f"  夹爪状态: {obs.gripper_open}")
 
-        # 显示 RGB 图像（可选）
-        rgb_path = os.path.join(self.episode_path, 'front_rgb', f'{frame_id}.png')
-        if os.path.exists(rgb_path):
-            print(f"  RGB图像: {rgb_path}")
-
-            # 询问是否显示图像
-            resp = input("是否显示图像？(y/n): ")
-            if resp.lower() == 'y':
-                self._show_image(rgb_path, f"Frame {frame_id} - RGB")
-
         # 标记关键帧状态
         if frame_id in self.keypoint_idxs:
             print("  ** 关键帧 **")
-
-    def _show_image(self, image_path: str, window_name: str):
-        """显示图像"""
-        try:
-            image = cv2.imread(image_path)
-            if image is not None:
-                cv2.imshow(window_name, image)
-                cv2.waitKey(0)
-                cv2.destroyAllWindows()
-            else:
-                print("无法读取图像")
-        except Exception as e:
-            print(f"显示图像失败: {e}")
 
     def save_cleaned_demo(self, output_path: Optional[str] = None) -> bool:
         """
@@ -353,21 +329,63 @@ class DataCleaner:
         return keypoints
 
 
+def _scan_episodes(data_root: str):
+    """扫描 data 目录下所有可用的 episode 路径"""
+    episodes = []
+    if not os.path.exists(data_root):
+        return episodes
+    for task in sorted(os.listdir(data_root)):
+        task_dir = os.path.join(data_root, task)
+        if not os.path.isdir(task_dir):
+            continue
+        ep_dir = os.path.join(task_dir, 'all_variations', 'episodes')
+        if not os.path.exists(ep_dir):
+            continue
+        for ep in sorted(os.listdir(ep_dir)):
+            ep_path = os.path.join(ep_dir, ep)
+            if os.path.isdir(ep_path):
+                episodes.append((task, ep, ep_path))
+    return episodes
+
+
 def main():
     """主函数"""
     print("=" * 60)
     print("Piper 数据清洗工具")
     print("=" * 60)
 
-    # 输入 Episode 路径
-    episode_path = input("输入 Episode 路径: ").strip()
+    # 默认数据路径（与脚本同级的 data 目录）
+    default_data = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'data')
+    data_root = input(f"数据目录 (默认 {default_data}): ").strip() or default_data
 
-    if not os.path.exists(episode_path):
-        print(f"路径不存在: {episode_path}")
+    # 扫描可用 episode
+    episodes = _scan_episodes(data_root)
+    if not episodes:
+        print(f"在 {data_root} 下未找到任何 episode 数据")
         sys.exit(1)
+
+    print(f"\n找到 {len(episodes)} 个 episode:\n")
+    for i, (task, ep, path) in enumerate(episodes):
+        print(f"  [{i}] {task} / {ep}  -> {path}")
+
+    print()
+    while True:
+        try:
+            choice = int(input(f"选择 episode (0-{len(episodes)-1}): ").strip())
+            if 0 <= choice < len(episodes):
+                break
+            print(f"请输入 0-{len(episodes)-1}")
+        except ValueError:
+            print("请输入数字")
+
+    task_name, ep_name, episode_path = episodes[choice]
+    print(f"\n已选择: {task_name} / {ep_name}")
 
     # 创建清洗工具
     cleaner = DataCleaner(episode_path)
+    if cleaner.demo is None:
+        print("加载失败，退出")
+        sys.exit(1)
 
     # 显示信息
     cleaner.print_info()
@@ -392,17 +410,14 @@ def main():
             break
 
         elif choice == '1':
-            # 删除帧
             trim_start = int(input("删除前N帧 (默认0): ") or '0')
             trim_end = int(input("删除后N帧 (默认0): ") or '0')
             cleaner.trim_frames(trim_start, trim_end)
 
         elif choice == '2':
-            # 交互式标记关键帧
             cleaner.mark_keypoint_interactive()
 
         elif choice == '3':
-            # 自动检测关键帧
             threshold = float(input("关节角度变化阈值 (默认0.1 rad): ") or '0.1')
             auto_keypoints = cleaner.auto_detect_keypoints(threshold)
 
@@ -411,12 +426,10 @@ def main():
                 cleaner.keypoint_idxs = auto_keypoints
 
         elif choice == '4':
-            # 保存
             output_path = input("输出路径 (默认覆盖原文件): ").strip()
             cleaner.save_cleaned_demo(output_path if output_path else None)
 
         elif choice == '5':
-            # 显示信息
             cleaner.print_info()
 
         else:
